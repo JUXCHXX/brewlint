@@ -37,6 +37,18 @@ public interface Rule {
     Severity defaultSeverity();
 
     /**
+     * Whether this rule needs a {@link io.github.brewlint.core.project.ProjectIndex}.
+     *
+     * <p>Default {@code false}, which is right for nearly every rule. Returning {@code true} makes
+     * the engine parse the sources an extra time, so a rule must only ask when it genuinely
+     * compares something across files. "A prototype bean injected into a singleton" is such a case;
+     * "this method is private" is not.
+     */
+    default boolean requiresProjectIndex() {
+        return false;
+    }
+
+    /**
      * Inspects one compilation unit and reports whatever it finds.
      *
      * <p>Must not throw for ordinary source constructs. A rule that throws is disabled for the

@@ -1,7 +1,7 @@
 # Configuration for scanning Brewlint's own sources.
 #
 # fixtures/ is excluded on purpose: it holds deliberately broken Spring code, so scanning it
-# without asking for it would report twelve findings that are supposed to be there. CI scans it
+# without asking for it would report twenty-six findings that are supposed to be there. CI scans it
 # explicitly instead (see FixturesScanTest and .github/workflows/ci.yml), which is the point.
 #
 # This file is also the reference for the configuration format. See README.md.
@@ -11,15 +11,34 @@ exclude:
   - "**/generated/**"
 
 rules:
-  # Proxy-dependent Spring annotations on a method Spring cannot proxy. Nothing here is a
-  # judgement call, so it stays on at its own severity.
-  AOP001:
-    enabled: true
+  # Nothing here is a judgement call, so these stay on at their own severity.
+  AOP001: true
+  TX002: true
+  BEAN001: true
 
-  # Resources that nothing closes. Downgraded rather than disabled: running `brewlint scan .` on
-  # this repository reports four RES001 warnings, all PrintWriter/StringWriter instances in test
-  # code where not closing them is harmless. Keeping them visible is the point, but they should
-  # not turn every build red.
+  # Downgraded rather than disabled. `brewlint scan .` on this repository reports three RES001
+  # warnings, all PrintWriter and StringWriter instances in test code where not closing them is
+  # harmless. Keeping them visible is the point, but they should not turn every build red.
   RES001:
     enabled: true
     severity: WARNING
+
+  RES002:
+    enabled: true
+    severity: WARNING
+
+  # A missing rollbackFor commits a transaction instead of rolling it back, but nothing crashes
+  # today, so it is a warning.
+  TX003:
+    enabled: true
+    severity: WARNING
+
+  # A prototype bean held by a singleton shares one instance for the life of the process. Also a
+  # warning: the code works, it just does not do what the scope says.
+  BEAN002:
+    enabled: true
+    severity: WARNING
+
+  # Field injection is a convention, not a defect. Nothing breaks today, so it is INFO and stays
+  # out of the way unless someone asks for it.
+  BEAN003: true

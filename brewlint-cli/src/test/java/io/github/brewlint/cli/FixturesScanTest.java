@@ -6,6 +6,7 @@ import io.github.brewlint.core.engine.AnalysisEngine;
 import io.github.brewlint.core.engine.SourceCollector;
 import io.github.brewlint.core.model.AnalysisResult;
 import io.github.brewlint.core.model.Finding;
+import io.github.brewlint.core.model.Severity;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -69,6 +70,16 @@ class FixturesScanTest {
     }
 
     @Test
+    @DisplayName("every rule that ships finds something in the broken fixtures")
+    void everyShippedRuleFires() {
+        // A rule that never fires anywhere is either broken or pointless, and nothing in the build
+        // would say so without this.
+        assertThat(ruleIds())
+                .containsExactlyInAnyOrder("AOP001", "BEAN001", "BEAN002", "BEAN003",
+                        "RES001", "RES002", "TX002", "TX003");
+    }
+
+    @Test
     @DisplayName("AOP001 finds every proxy-dependent annotation on a non-proxyable method")
     void findsAop001() {
         List<Finding> findings = rule("AOP001");
@@ -83,12 +94,36 @@ class FixturesScanTest {
     }
 
     @Test
+    @DisplayName("TX002 finds self-invoked transactions and nothing else")
+    void findsTx002() {
+        List<Finding> findings = rule("TX002");
+
+        // PaymentProcessor: ledger() called from capture() and from settle().
+        assertThat(findings).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(findings).allSatisfy(finding -> {
+            assertThat(finding.filePath()).endsWith("PaymentProcessor.java");
+            assertThat(finding.message()).contains("bypasses the Spring proxy");
+        });
+    }
+
+    @Test
+    @DisplayName("TX003 finds checked exceptions without rollbackFor")
+    void findsTx003() {
+        List<Finding> findings = rule("TX003");
+
+        // PaymentProcessor: persist() declares SQLException, refresh() catches it.
+        assertThat(findings).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(findings).allSatisfy(finding ->
+                assertThat(finding.filePath()).endsWith("PaymentProcessor.java"));
+        assertThat(findings).allSatisfy(finding ->
+                assertThat(finding.suggestion()).contains("rollbackFor"));
+    }
+
+    @Test
     @DisplayName("RES001 finds unclosed streams and JDBC objects")
     void findsRes001() {
         List<Finding> findings = rule("RES001");
 
-        // ReportExporter: the field, the unclosed local, the var local.
-        // InventoryDao: Connection, Statement, the unclosed BufferedReader.
         assertThat(findings).hasSizeGreaterThanOrEqualTo(6);
         assertThat(findings).extracting(Finding::filePath)
                 .anyMatch(path -> path.endsWith("ReportExporter.java"))
@@ -98,22 +133,65 @@ class FixturesScanTest {
     }
 
     @Test
-    @DisplayName("the deliberately correct fixture produces no findings at all")
-    void correctFixtureIsClean() {
+    @DisplayName("RES002 finds unclosed Files streams")
+    void findsRes002() {
+        List<Finding> findings = rule("RES002");
+
+        // LogImporter: countLines, countEntries, entries, forEachLine.
+        assertThat(findings).hasSizeGreaterThanOrEqualTo(4);
+        assertThat(findings).allSatisfy(finding ->
+                assertThat(finding.filePath()).endsWith("LogImporter.java"));
+    }
+
+    @Test
+    @DisplayName("BEAN001 finds an entity that is also a component")
+    void findsBean001() {
+        List<Finding> findings = rule("BEAN001");
+
+        assertThat(findings).hasSizeGreaterThanOrEqualTo(1);
+        assertThat(findings).anySatisfy(finding ->
+                assertThat(finding.message()).contains("@Entity").contains("@Component"));
+    }
+
+    @Test
+    @DisplayName("BEAN002 finds a prototype bean held by a singleton")
+    void findsBean002() {
+        List<Finding> findings = rule("BEAN002");
+
+        assertThat(findings).hasSizeGreaterThanOrEqualTo(1);
+        assertThat(findings).anySatisfy(finding ->
+                assertThat(finding.message()).contains("ReportCache").contains("prototype"));
+    }
+
+    @Test
+    @DisplayName("BEAN003 finds field injection")
+    void findsBean003() {
+        List<Finding> findings = rule("BEAN003");
+
+        assertThat(findings).hasSizeGreaterThanOrEqualTo(1);
+        assertThat(findings).allSatisfy(finding ->
+                assertThat(finding.severity())
+                        .as("a convention, not a defect")
+                        .isEqualTo(Severity.INFO));
+    }
+
+    @Test
+    @DisplayName("the deliberately correct fixtures produce no findings at all")
+    void correctFixturesAreClean() {
         Set<String> filesWithFindings = result.findings().stream()
                 .map(Finding::filePath)
                 .collect(Collectors.toSet());
 
         assertThat(filesWithFindings)
-                .as("PaymentService.java is correct code and must stay clean")
-                .noneMatch(path -> path.endsWith("PaymentService.java"));
+                .as("the com/example/correct package is correct code and must stay clean")
+                .allMatch(path -> !path.contains("com/example/correct"));
     }
 
     @Test
     @DisplayName("correct usage inside the broken files is not reported either")
     void noFalsePositivesOnCorrectConstructs() {
-        // exportCorrectly uses try-with-resources, exportWithManualClose uses try/finally, and
-        // readPassedIn takes the stream as a parameter. None of the three is a leak.
+        // ReportExporter.exportCorrectly uses try-with-resources, exportWithManualClose uses
+        // try/finally, and readPassedIn takes the stream as a parameter. None is a leak.
         List<Finding> exporterFindings = result.findings().stream()
                 .filter(finding -> finding.filePath().endsWith("ReportExporter.java"))
                 .toList();
@@ -121,7 +199,29 @@ class FixturesScanTest {
         assertThat(exporterFindings).hasSize(3);
         assertThat(exporterFindings).noneSatisfy(finding ->
                 assertThat(finding.line()).isBetween(
-                        lineOf("exportCorrectly"), lineOf("exportWithManualClose")));
+                        lineOf("ReportExporter.java", "exportCorrectly"),
+                        lineOf("ReportExporter.java", "exportWithManualClose")));
+    }
+
+    @Test
+    @DisplayName("a transaction with rollbackFor is never reported by TX003")
+    void noTx003WhereRollbackForPresent() {
+        // PaymentProcessor.archive and .purge both name what to roll back on.
+        assertThat(result.findings())
+                .filteredOn(finding -> finding.ruleId().equals("TX003"))
+                .noneSatisfy(finding -> assertThat(finding.line()).isBetween(
+                        lineOf("PaymentProcessor.java", "public void archive"),
+                        lineOf("PaymentProcessor.java", "public void purge")));
+    }
+
+    @Test
+    @DisplayName("a Files stream in try-with-resources is never reported by RES002")
+    void noRes002WhereTryWithResources() {
+        assertThat(result.findings())
+                .filteredOn(finding -> finding.ruleId().equals("RES002"))
+                .noneSatisfy(finding -> assertThat(finding.line()).isBetween(
+                        lineOf("LogImporter.java", "public long countCorrectly"),
+                        lineOf("LogImporter.java", "public List<String> inMemory")));
     }
 
     @Test
@@ -134,19 +234,23 @@ class FixturesScanTest {
         });
     }
 
-    private static int lineOf(String methodName) {
+    private static Set<String> ruleIds() {
+        return result.findings().stream().map(Finding::ruleId).collect(Collectors.toSet());
+    }
+
+    private static int lineOf(String fileName, String marker) {
         try {
             List<String> lines = Files.readAllLines(
-                    locateFixturesDirectory().resolve("src/main/java/com/example/broken/ReportExporter.java"));
+                    locateFixturesDirectory().resolve("src/main/java/com/example/broken/" + fileName));
             for (int index = 0; index < lines.size(); index++) {
-                if (lines.get(index).contains(methodName + "(")) {
+                if (lines.get(index).contains(marker)) {
                     return index + 1;
                 }
             }
         } catch (IOException exception) {
             throw new IllegalStateException(exception);
         }
-        throw new IllegalStateException("Method not found in fixture: " + methodName);
+        throw new IllegalStateException("Marker not found in fixture " + fileName + ": " + marker);
     }
 
     private static List<Finding> rule(String ruleId) {

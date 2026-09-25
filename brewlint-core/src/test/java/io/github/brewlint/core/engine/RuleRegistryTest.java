@@ -17,11 +17,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RuleRegistryTest {
 
     @Test
-    @DisplayName("finds the rules declared in META-INF/services")
+    @DisplayName("finds every rule declared in META-INF/services")
     void discoversShippedRules() {
         List<Rule> rules = RuleRegistry.discover();
 
-        assertThat(rules).extracting(Rule::id).containsExactly("AOP001", "RES001");
+        assertThat(rules).extracting(Rule::id).containsExactly(
+                "AOP001", "BEAN001", "BEAN002", "BEAN003",
+                "RES001", "RES002", "TX002", "TX003");
+    }
+
+    @Test
+    @DisplayName("only the cross-file rule asks for the project index")
+    void projectIndexIsOptIn() {
+        // Building the index means parsing every file twice, so a rule must justify the cost.
+        assertThat(RuleRegistry.discover())
+                .filteredOn(Rule::requiresProjectIndex)
+                .extracting(Rule::id)
+                .containsExactly("BEAN002");
     }
 
     @Test

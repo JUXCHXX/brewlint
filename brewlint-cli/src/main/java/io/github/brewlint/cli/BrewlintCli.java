@@ -7,6 +7,7 @@ import io.github.brewlint.core.engine.AnalysisEngine;
 import io.github.brewlint.core.engine.SourceCollector;
 import io.github.brewlint.core.model.AnalysisResult;
 import io.github.brewlint.core.model.Severity;
+import io.github.brewlint.report.JsonReportRenderer;
 import io.github.brewlint.report.ReportOptions;
 import io.github.brewlint.report.ReportRenderer;
 import io.github.brewlint.report.TerminalReportRenderer;
@@ -90,10 +91,21 @@ public final class BrewlintCli implements Callable<Integer> {
                 description = "Project directory or single .java file to analyse. Default: current directory.")
         Path path;
 
+        @Option(names = "--format",
+                paramLabel = "<format>",
+                description = "Output format: terminal or json. Default: terminal.")
+        String format = "terminal";
+
+        @Option(names = {"-o", "--output"},
+                paramLabel = "<file>",
+                description = "Write the report to this file instead of standard output.")
+        Path output;
+
         @CommandLine.Spec
         CommandLine.Model.CommandSpec spec;
 
         private final ReportRenderer terminalRenderer = new TerminalReportRenderer();
+        private final ReportRenderer jsonRenderer = new JsonReportRenderer();
 
         @Override
         public Integer call() {
@@ -130,9 +142,8 @@ public final class BrewlintCli implements Callable<Integer> {
                         AnsiSupport.isColorEnabled(noColor, forceColor),
                         maxFindings,
                         ReportOptions.DEFAULT_WIDTH);
-                PrintWriter writer = spec.commandLine().getOut();
-                terminalRenderer.render(result, options, writer);
-                writer.flush();
+                write(result, options);
+                flush();
 
                 return fails(result, failOn) ? EXIT_FINDINGS : EXIT_CLEAN;
 
@@ -141,6 +152,41 @@ public final class BrewlintCli implements Callable<Integer> {
                 spec.commandLine().getErr().flush();
                 return EXIT_ERROR;
             }
+        }
+
+        private void write(AnalysisResult result, ReportOptions options) throws IOException {
+            ReportRenderer renderer = rendererFor(format);
+            // JSON is never truncated. A client that reads a partial findings array has to
+            // distinguish "there were no more findings" from "output was cut off", which is exactly
+            // the ambiguity that makes a machine-readable format untrustworthy.
+            ReportOptions effective = "json".equals(renderer.format())
+                    ? options.withMaxFindings(null)
+                    : options;
+
+            if (output == null) {
+                renderer.render(result, effective, spec.commandLine().getOut());
+                return;
+            }
+            Path parent = output.toAbsolutePath().getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            try (java.io.Writer writer = Files.newBufferedWriter(output, StandardCharsets.UTF_8)) {
+                renderer.render(result, effective, writer);
+            }
+        }
+
+        private ReportRenderer rendererFor(String requested) {
+            return switch (requested.toLowerCase(java.util.Locale.ROOT)) {
+                case "terminal" -> terminalRenderer;
+                case "json" -> jsonRenderer;
+                default -> throw new IllegalArgumentException(
+                        "Unknown format '" + requested + "'. Expected: terminal, json");
+            };
+        }
+
+        private void flush() {
+            spec.commandLine().getOut().flush();
         }
 
         /**

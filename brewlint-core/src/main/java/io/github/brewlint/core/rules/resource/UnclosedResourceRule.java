@@ -9,8 +9,6 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
-import com.github.javaparser.ast.expr.VariableDeclarationExpr;
-import com.github.javaparser.ast.stmt.TryStmt;
 import com.github.javaparser.ast.type.Type;
 import io.github.brewlint.core.model.Severity;
 import io.github.brewlint.core.rule.Rule;
@@ -81,7 +79,7 @@ public final class UnclosedResourceRule implements Rule {
             if (typeName == null || !context.typeSolver().isAnyOf(typeName, RESOURCE_TYPES)) {
                 continue;
             }
-            if (isTryWithResource(declarator) || isClosedManually(declarator, declarator.getNameAsString())) {
+            if (TryWithResources.declares(declarator) || isClosedManually(declarator, declarator.getNameAsString())) {
                 continue;
             }
 
@@ -101,29 +99,6 @@ public final class UnclosedResourceRule implements Rule {
 
     private boolean isField(VariableDeclarator declarator) {
         return declarator.getParentNode().filter(FieldDeclaration.class::isInstance).isPresent();
-    }
-
-    /**
-     * True when the declaration is a try-with-resources entry, i.e.
-     * {@code try (InputStream in = ...) }.
-     */
-    private boolean isTryWithResource(VariableDeclarator declarator) {
-        Optional<Node> expressionNode = declarator.getParentNode();
-        if (expressionNode.isEmpty() || !(expressionNode.get() instanceof VariableDeclarationExpr expression)) {
-            return false;
-        }
-        Optional<Node> statementNode = expression.getParentNode();
-        if (statementNode.isEmpty() || !(statementNode.get() instanceof TryStmt tryStatement)) {
-            return false;
-        }
-        // Identity, not equals: JavaParser node equality is structural, so two identical resource
-        // declarations in the same try would both match with equals.
-        for (Expression resource : tryStatement.getResources()) {
-            if (resource == expression) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

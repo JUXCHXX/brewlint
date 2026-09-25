@@ -9,8 +9,8 @@ runs out of file descriptors under load, in a completely different part of the s
 throws, neither logs, and neither is caught by a code review that reads for intent rather than
 mechanics.
 
-> **Status: Hito 1 complete.** Two rules, a working CLI, 139 tests. See
-> [Roadmap](#roadmap) for what is next.
+> **Status: Hitos 1 and 2 complete.** Eight rules, CLI with terminal and JSON output, 260 tests.
+> See [Roadmap](#roadmap) for what is next.
 
 ---
 
@@ -26,7 +26,7 @@ java -jar brewlint-cli/target/brewlint-cli-0.1.0-SNAPSHOT.jar scan --path fixtur
 Only a JDK 17+ is required to build. Installing Brewlint as a single command is Hito 3.
 
 ```bash
-./mvnw test                         # 139 tests
+./mvnw test                         # 260 tests
 ```
 
 ## What it reports
@@ -51,7 +51,7 @@ brewlint 0.1.0-SNAPSHOT
       -> Use try-with-resources: try (InputStream template = ...) { ... }.
 
   ------------------------------------------------------------------------------
-  12 findings in 3 files  ·  5 files scanned  ·  12 errors, 0 warnings, 0 info  ·  77ms
+  26 findings in 6 files  ·  9 files scanned  ·  17 errors, 7 warnings, 2 info  ·  131ms
 ```
 
 ### Rules
@@ -59,13 +59,15 @@ brewlint 0.1.0-SNAPSHOT
 | Id | Category | Severity | What it finds |
 |---|---|---|---|
 | `AOP001` | `spring-aop` | error | `@Transactional`, `@Async`, `@Cacheable`, `@CacheEvict`, `@Scheduled`, `@Retryable` on a `private`, `final` or `static` method, which CGLIB cannot override |
+| `TX002` | `transactional` | error | A `@Transactional` method called from inside its own class, so the call bypasses the proxy |
+| `TX003` | `transactional` | warning | `@Transactional` with no `rollbackFor`, where a checked exception can escape and Spring will commit instead of rolling back |
 | `RES001` | `resource` | error | An `InputStream`, `Reader`, `Writer`, JDBC object, `ZipFile` or `Channel` assigned to a variable nothing closes |
+| `RES002` | `resource` | warning | A stream from `Files.lines/list/walk/find` that is never closed. Consuming it is not closing it |
+| `BEAN001` | `bean` | error | A JPA `@Entity` or Mongo `@Document` also annotated `@Component`/`@Service`/`@Repository` |
+| `BEAN002` | `bean` | warning | A prototype-scoped bean injected into a singleton, so every caller shares one instance |
+| `BEAN003` | `bean` | info | Field injection with `@Autowired`/`@Inject`/`@Resource`, which leaves a half-constructed bean |
 
 `./mvnw package && java -jar brewlint-cli/target/*.jar scan --list-rules` prints the live list.
-
-Planned, in roadmap order: `TX002` self-invocation, `TX003` missing `rollbackFor`, `RES002`
-`Files.lines()`/`walk()`, and the `BEAN00x` family (entity annotated `@Component`, prototype
-injected into a singleton, field injection).
 
 ## Usage
 
@@ -74,6 +76,8 @@ brewlint scan [options]
 
   -p, --path <dir>        Directory or single .java file. Default: current directory.
   -c, --config <file>     Path to brewlint.yml. Default: <path>/brewlint.yml.
+      --format <format>   terminal or json. Default: terminal.
+  -o, --output <file>     Write the report to a file instead of standard output.
       --fail-on <sev>     Exit 1 at or above this severity: ERROR, WARNING, INFO, NONE.
       --max-findings <n>  Print at most n findings. The summary still counts them all.
       --no-color          Never emit ANSI escapes.
@@ -88,6 +92,47 @@ Exit codes are a contract with CI:
 | `0` | Clean, or findings below the threshold |
 | `1` | Findings at or above `--fail-on` |
 | `2` | Brewlint could not run: bad path, malformed `brewlint.yml`, unknown rule id |
+
+### JSON output
+
+`--format json` is the contract Hito 6 (VS Code) and Hito 7 (GitHub Action) will be written against,
+which makes it the most consequential format in the project. Every key is always present, even when
+its value is null, so a client never has to tell "absent" from "empty".
+
+```console
+$ brewlint scan --path src --format json --output report.json
+$ python3 -c "import json; print(len(json.load(open('report.json'))['findings']))"
+3
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "tool": "brewlint",
+  "toolVersion": "0.1.0-SNAPSHOT",
+  "filesScanned": 9,
+  "filesWithParseErrors": 0,
+  "durationMillis": 131,
+  "counts": { "error": 17, "warning": 7, "info": 2 },
+  "findings": [
+    {
+      "ruleId": "RES001",
+      "category": "resource",
+      "severity": "ERROR",
+      "file": "src/main/java/com/example/broken/InventoryDao.java",
+      "line": 18,
+      "column": 20,
+      "endLine": 18,
+      "message": "Local variable connection holds a Connection that is never closed.",
+      "suggestion": "Use try-with-resources: try (Connection connection = ...) { ... }."
+    }
+  ]
+}
+```
+
+JSON is never truncated by `--max-findings`. A client reading a partial array would have to guess
+whether there were no more findings or whether the output was cut off, which is exactly the
+ambiguity that makes a machine-readable format untrustworthy.
 
 ## Configuration
 
@@ -139,22 +184,38 @@ RES001 with no test failing.
 continues. Not everything on a real codebase compiles, and a linter that stops at the first odd
 file is useless.
 
+**Cross-file rules are opt-in, because they cost a second parse.** "A prototype-scoped bean is
+injected into a singleton" is a statement about two different files, and a rule that only sees one
+`CompilationUnit` cannot make it. A rule declares `requiresProjectIndex()` and the engine builds a
+small index of every declared type if, and only if, an enabled rule asks. A run of single-file rules
+pays nothing. `RuleRegistryTest` asserts that exactly one of the eight rules currently opts in, so
+the cost cannot quietly spread.
+
+**Names are not proof of identity.** The index is keyed by simple name, and two packages can both
+declare an `Order`. So `BEAN002` only reports when *every* type answering to that name is prototype
+scoped. One `com.a.Order` being a prototype must not implicate an unrelated `com.b.Order`.
+
 **False positives are the expensive failure.** A missed issue costs a developer a little time. A
 false positive costs them trust in every other finding, and then they turn the tool off. Every rule
 ships with negative tests for the correct code next to it: try-with-resources, manual
-`try/finally`, method parameters, package-private methods, and a deliberately correct fixture that
-must stay clean forever.
+`try/finally`, method parameters, package-private methods, `rollbackFor` already present, entity
+with no stereotype, and a deliberately correct fixture package that must stay clean forever.
+
+**Some things are reported, some are only suggested.** `BEAN003` field injection has default
+severity INFO, because nothing breaks today and conflating a convention with a defect is how people
+come to hate a linter. `BEAN001` is an ERROR, because component scanning really does create a second
+instance. Same rule family, different honesty about how bad it is.
 
 **Engine knows nothing about output.** `brewlint-core` takes paths in and returns an
 `AnalysisResult`. The terminal renderer, the JSON the VS Code extension will consume, the PDF and
 the GitHub Action are all built on that one object.
 
-### Two things that are easy to get wrong, and were
+### Three things that are easy to get wrong, and were
 
 `maven-shade-plugin` silently loses `META-INF/services` unless `ServicesResourceTransformer` is
 configured. Miss it and the fat jar discovers **zero** rules, reports "No findings" and exits `0`.
-CI runs the shaded jar against `fixtures/` and asserts both rule ids appear, which is what catches
-it.
+CI runs the shaded jar against `fixtures/`, asserts all eight rule ids appear, and separately
+asserts the correct fixtures stay clean.
 
 `brewlint.yml` cannot carry a `distributionSha256Sum` for the Maven distribution. The wrapper
 validates with `sha256sum -c` and looks for `sha256sum` before `shasum`; macOS ships
@@ -162,14 +223,19 @@ validates with `sha256sum -c` and looks for `sha256sum` before `shasum`; macOS s
 `./mvnw` aborts with "your Maven distribution might be compromised". The file explains the trade-off
 in place.
 
+A hand-rolled JSON writer has exactly one place where it can go quietly wrong: nesting. Writing
+`"counts": <object>` through a method that quotes its value produces JSON that every parser accepts
+and every consumer misreads. `JsonReportRendererTest` asserts the nested types are objects and
+arrays, and CI re-parses the real output with `json.load` for the same reason.
+
 ## Architecture
 
 ```
 brewlint/
-├── brewlint-core/     Parser, rule engine, plugin contract, finding model, config.
+├── brewlint-core/     Parser, rule engine, plugin contract, finding model, config, project index.
 │                      No terminal, no PDF, no CLI. Reused by every consumer.
 ├── brewlint-ai/       Placeholder for Hito 4. Anthropic + Ollama, opt-in.
-├── brewlint-report/   ReportRenderer contract + the terminal renderer.
+├── brewlint-report/   ReportRenderer contract + terminal + JSON.
 ├── brewlint-cli/      picocli, exit codes, produces the fat jar.
 └── fixtures/          A deliberately broken Spring project. NOT a Maven module:
                        it must never compile.
@@ -184,8 +250,8 @@ accidentally depend on it building.
 | Hito | Scope | Status |
 |---|---|---|
 | 1 | Scaffolding, rule engine, `AOP001`, `RES001`, CLI, terminal report, CI | **done** |
-| 2 | `TX002`, `TX003`, `RES002`, `BEAN001`-`003`, shared `AopProxyability` helper, JSON output, configurable severities | next |
-| 3 | `jlink` runtime per platform, npm wrapper, `npm install -g brewlint` with no Java needed | planned |
+| 2 | `TX002`, `TX003`, `RES002`, `BEAN001`-`003`, shared `AopProxyability`, JSON output, project index | **done** |
+| 3 | `jlink` runtime per platform, npm wrapper, `npm install -g brewlint` with no Java needed | next |
 | 4 | `AiProvider` interface, Anthropic, local Ollama, secret redaction | planned |
 | 5 | PDF report via OpenHTMLtoPDF | planned |
 | 6 | VS Code extension rendering findings as Diagnostics | planned |

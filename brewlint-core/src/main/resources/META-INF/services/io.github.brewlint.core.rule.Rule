@@ -1,4 +1,10 @@
 # Rule discovery. A rule is on the classpath and active if and only if it is listed here.
 # Adding a rule means adding a class and one line to this file, and nothing else.
 io.github.brewlint.core.rules.aop.AopAnnotationOnNonProxyableMethodRule
+io.github.brewlint.core.rules.bean.EntityAnnotatedAsBeanRule
+io.github.brewlint.core.rules.bean.FieldInjectionRule
+io.github.brewlint.core.rules.bean.PrototypeIntoSingletonRule
+io.github.brewlint.core.rules.resource.UnclosedFileStreamRule
 io.github.brewlint.core.rules.resource.UnclosedResourceRule
+io.github.brewlint.core.rules.transactional.MissingRollbackForRule
+io.github.brewlint.core.rules.transactional.SelfInvokedTransactionalMethodRule

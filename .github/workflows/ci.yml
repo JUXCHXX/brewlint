@@ -64,15 +64,45 @@ jobs:
             echo "::error::expected exit code 1 from the fixtures scan, got ${EXIT:-0}"
             exit 1
           fi
-          for RULE in AOP001 RES001; do
+          # Every rule has to fire on something. A rule that never fires is either broken or
+          # pointless, and no unit test can tell the difference on its own.
+          for RULE in AOP001 BEAN001 BEAN002 BEAN003 RES001 RES002 TX002 TX003; do
             grep -q "$RULE" report.txt || {
               echo "::error::$RULE was not reported; the shaded jar likely lost its rule discovery"
               exit 1
             }
           done
 
-      - name: The correct fixture must stay clean
+      - name: The correct fixtures must stay clean
         run: |
           set -euo pipefail
           JAR=$(ls brewlint-cli/target/brewlint-cli-*.jar | head -1)
-          java -jar "$JAR" scan --path fixtures/src/main/java/com/example/correct --no-color
+          java -jar "$JAR" scan --path fixtures/src/main/java/com/example/correct --no-color | tee clean.txt
+          grep -q "No findings" clean.txt || {
+            echo "::error::a false positive landed in the deliberately correct fixtures"
+            exit 1
+          }
+
+      # The JSON output is the contract Hito 6 (VS Code) and Hito 7 (GitHub Action) will be written
+      # against. Checking it parses here means a broken serializer fails the build now, rather than
+      # after those clients are built on top of it.
+      - name: The JSON output must be valid and complete
+        run: |
+          set -euo pipefail
+          JAR=$(ls brewlint-cli/target/brewlint-cli-*.jar | head -1)
+          java -jar "$JAR" scan --path fixtures --format json --output report.json || true
+          python3 - <<'PY'
+          import json
+          with open("report.json", encoding="utf-8") as handle:
+              report = json.load(handle)
+          assert isinstance(report["counts"], dict), "counts must be an object, not a string"
+          assert isinstance(report["findings"], list), "findings must be an array, not a string"
+          assert report["findings"], "expected findings in the broken fixtures"
+          for finding in report["findings"]:
+              for key in ("ruleId", "severity", "file", "line", "column", "message", "suggestion"):
+                  assert key in finding, f"missing key {key}"
+          ids = {finding["ruleId"] for finding in report["findings"]}
+          expected = {"AOP001", "BEAN001", "BEAN002", "BEAN003", "RES001", "RES002", "TX002", "TX003"}
+          assert expected <= ids, f"missing rules in JSON: {sorted(expected - ids)}"
+          print(f"JSON OK: {len(report['findings'])} findings, rules {sorted(ids)}")
+          PY

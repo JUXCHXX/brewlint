@@ -11,6 +11,8 @@ import io.github.brewlint.core.config.BrewlintConfig;
 import io.github.brewlint.core.model.AnalysisResult;
 import io.github.brewlint.core.model.Finding;
 import io.github.brewlint.core.model.Severity;
+import io.github.brewlint.core.project.ProjectIndex;
+import io.github.brewlint.core.project.ProjectIndexBuilder;
 import io.github.brewlint.core.rule.Rule;
 import io.github.brewlint.core.rule.RuleCollector;
 import io.github.brewlint.core.rule.RuleContext;
@@ -53,15 +55,25 @@ public final class AnalysisEngine {
             TypeSolver typeSolver,
             BrewlintConfig config,
             String toolVersion) {
+        this(projectRoot, rules, typeSolver, config, toolVersion, new JavaParser(new ParserConfiguration()
+                .setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE)
+                .setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+
+    public AnalysisEngine(
+            Path projectRoot,
+            List<Rule> rules,
+            TypeSolver typeSolver,
+            BrewlintConfig config,
+            String toolVersion,
+            JavaParser parser) {
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.rules = RuleRegistry.validate(rules);
         this.typeSolver = typeSolver;
         this.config = config;
         this.excludePatterns = config.exclude().stream().map(GlobPattern::compile).toList();
         this.toolVersion = toolVersion;
-        this.parser = new JavaParser(new ParserConfiguration()
-                .setLanguageLevel(ParserConfiguration.LanguageLevel.BLEEDING_EDGE)
-                .setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8));
+        this.parser = parser;
         config.validateAgainst(this.rules);
     }
 
@@ -84,6 +96,15 @@ public final class AnalysisEngine {
         List<Finding> findings = new ArrayList<>();
         int filesScanned = 0;
         int filesWithParseErrors = 0;
+
+        // Built only when an enabled rule asks for it, because building it means parsing every file
+        // a second time. A run of single-file rules pays nothing.
+        List<Path> analysable = files.stream()
+                .filter(file -> !isExcluded(relativePathOf(file)))
+                .toList();
+        ProjectIndex projectIndex = ProjectIndexBuilder.isNeededFor(rules, config::isEnabled)
+                ? ProjectIndexBuilder.build(analysable)
+                : ProjectIndex.EMPTY;
 
         for (Path file : files) {
             String relativePath = relativePathOf(file);
@@ -114,7 +135,8 @@ public final class AnalysisEngine {
             filesScanned++;
 
             CompilationUnit compilationUnit = parsed.getResult().orElseThrow();
-            RuleContext context = new DefaultRuleContext(compilationUnit, file, relativePath, typeSolver);
+            RuleContext context = new DefaultRuleContext(
+                    compilationUnit, file, relativePath, typeSolver, projectIndex);
             for (Rule rule : rules) {
                 if (!config.isEnabled(rule.id())) {
                     continue;
@@ -165,7 +187,8 @@ public final class AnalysisEngine {
             CompilationUnit compilationUnit,
             Path file,
             String relativePath,
-            TypeSolver typeSolver) implements RuleContext {
+            TypeSolver typeSolver,
+            ProjectIndex projectIndex) implements RuleContext {
     }
 
     /**

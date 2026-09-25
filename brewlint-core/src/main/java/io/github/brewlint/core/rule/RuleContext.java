@@ -1,6 +1,7 @@
 package io.github.brewlint.core.rule;
 
 import com.github.javaparser.ast.CompilationUnit;
+import io.github.brewlint.core.project.ProjectIndex;
 import io.github.brewlint.core.type.TypeSolver;
 
 import java.nio.file.Path;
@@ -30,4 +31,13 @@ public interface RuleContext {
 
     /** Type resolution for this run. See {@link TypeSolver} for why this is an interface. */
     TypeSolver typeSolver();
+
+    /**
+     * What every file in the project declares, keyed by type name.
+     *
+     * <p>Empty unless some enabled rule asked for it with
+     * {@link Rule#requiresProjectIndex()}. A rule that declares the requirement and then reads an
+     * empty index has a bug in its own declaration, not a gap in the data.
+     */
+    ProjectIndex projectIndex();
 }
