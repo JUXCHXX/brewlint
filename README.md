@@ -1,5 +1,8 @@
 # Brewlint
 
+[![CI](https://github.com/JUXCHXX/brewlint/actions/workflows/ci.yml/badge.svg)](https://github.com/JUXCHXX/brewlint/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 Static analysis for Spring Boot anti-patterns. Curated rules with a Java parser, not regex.
 
 The bugs Brewlint looks for share a shape: **the code looks right, compiles, deploys, and then
