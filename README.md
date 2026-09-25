@@ -9,24 +9,32 @@ runs out of file descriptors under load, in a completely different part of the s
 throws, neither logs, and neither is caught by a code review that reads for intent rather than
 mechanics.
 
-> **Status: Hitos 1 and 2 complete.** Eight rules, CLI with terminal and JSON output, 260 tests.
-> See [Roadmap](#roadmap) for what is next.
+> **Status: Hitos 1 to 3 complete.** Eight rules, a self-contained binary, a CLI with terminal and
+> JSON output, 260 Java tests and 26 packaging checks. See [Roadmap](#roadmap) for what is next.
 
 ---
 
 ## Quick start
 
 ```bash
-git clone https://github.com/JUXCHXX/brewlint
-cd brewlint
-./mvnw package                      # no Maven required, the wrapper is committed
-java -jar brewlint-cli/target/brewlint-cli-0.1.0-SNAPSHOT.jar scan --path fixtures
+npm install -g brewlint        # no Java needed
+brewlint scan --path src
 ```
 
-Only a JDK 17+ is required to build. Installing Brewlint as a single command is Hito 3.
+That is the whole install. The npm package ships a native launcher with a `jlink` runtime baked in,
+about 48 MB per platform, so Brewlint runs on a machine that has never had a JDK on it.
+
+Building from source needs a JDK 17+ and nothing else:
 
 ```bash
+git clone https://github.com/JUXCHXX/brewlint
+cd brewlint
 ./mvnw test                         # 260 tests
+./mvnw package                      # runnable fat jar
+java -jar brewlint-cli/target/brewlint-cli-0.1.0-SNAPSHOT.jar scan --path fixtures
+
+./scripts/build-runtime.sh          # self-contained binary in dist/
+node npm/scripts/test-install.mjs   # proves the install works with no Java
 ```
 
 ## What it reports
@@ -228,6 +236,54 @@ A hand-rolled JSON writer has exactly one place where it can go quietly wrong: n
 and every consumer misreads. `JsonReportRendererTest` asserts the nested types are objects and
 arrays, and CI re-parses the real output with `json.load` for the same reason.
 
+Node's platform names and npm's are not the same. Node says `darwin-arm64`; the package that holds
+the binary is called `@brewlint/macos-arm64`. Deriving one from the other gives a shim that looks for
+a package the install never put there, which fails confusingly because the install genuinely
+succeeded. `lib/platforms.js` is a data file rather than branching logic so the mapping is stated
+once, and `npm/brewlint/test/platforms.test.js` pins it.
+
+## Packaging
+
+Three npm packages, one per platform, plus a thin main package:
+
+```
+npm install -g brewlint
+└── optionalDependencies
+    ├── @brewlint/macos-arm64   48 MB   (skipped on other platforms)
+    ├── @brewlint/linux-x64     ~45 MB  (skipped)
+    └── @brewlint/win-x64       ~45 MB  (skipped)
+```
+
+Each platform package declares `os` and `cpu`, which is the entire mechanism: npm reads them and
+skips what cannot run. The main package depends on all three as **optional** dependencies, so a
+platform nobody ships never fails the install.
+
+The launcher is 3.8 kB of Node that resolves the platform package and `spawn`s the native binary
+with inherited stdio. Two things it deliberately gets right:
+
+- **It forwards the exit code exactly.** 0, 1 and 2 are a contract with CI. A launcher that
+  collapsed them to 0 or 1 would turn a red build green and nobody would find out until a real bug
+  shipped. `test-install.mjs` asserts all three survive.
+- **It inherits stdio instead of piping.** The report asks whether stdout is a terminal to decide on
+  colour, and a pipe between the shim and the binary would break that *and* swallow the exit status.
+
+**jpackage cannot cross-compile.** A macOS machine produces a macOS binary and nothing else, so the
+release workflow is a matrix over the three runners. `scripts/build-runtime.sh` refuses a target that
+does not match the host with a clear message rather than failing later.
+
+Two constraints the build hit, both now documented in the script:
+
+- A macOS `CFBundleShortVersionString` must start at 1, so the bundle version (`1.0.0`) and the npm
+  version (`0.1.0`) are separate variables.
+- `jpackage` copies its whole `--input` directory into the image. Pointing it at the Maven `target/`
+  dragged 4.6 MB of `test-classes` and `surefire-reports` into the tarball. The script stages one
+  file into an empty directory first.
+
+The runtime image is closed at build time, which is why `build-runtime.sh` asserts its four modules
+are present and runs the launcher with an empty environment before declaring success. `java.net.http`
+is in that list for Hito 4: without it the packaged binary would work perfectly until the Anthropic
+provider shipped, and then fail only for npm users, which is the worst possible way to find out.
+
 ## Architecture
 
 ```
@@ -251,12 +307,17 @@ accidentally depend on it building.
 |---|---|---|
 | 1 | Scaffolding, rule engine, `AOP001`, `RES001`, CLI, terminal report, CI | **done** |
 | 2 | `TX002`, `TX003`, `RES002`, `BEAN001`-`003`, shared `AopProxyability`, JSON output, project index | **done** |
-| 3 | `jlink` runtime per platform, npm wrapper, `npm install -g brewlint` with no Java needed | next |
-| 4 | `AiProvider` interface, Anthropic, local Ollama, secret redaction | planned |
+| 3 | `jlink` runtime per platform, npm wrapper, install with no Java needed | **done, pending publish** |
+| 4 | `AiProvider` interface, Anthropic, local Ollama, secret redaction | next |
 | 5 | PDF report via OpenHTMLtoPDF | planned |
 | 6 | VS Code extension rendering findings as Diagnostics | planned |
 | 7 | GitHub Action commenting on pull requests | planned |
 | 8 | N+1 detection, scoped to the unambiguous pattern | planned |
+
+Hito 3 is complete but not published. The three platform binaries cannot be built on one machine, so
+the release workflow needs a run on the tag `v0.1.0`, and `npm publish --provenance` needs an
+`NPM_TOKEN`. Until then the binary is not on the registry and `npm install -g brewlint` does not
+resolve.
 
 N+1 is deliberately last. It needs dataflow analysis between the method that loads the entity and
 the one that iterates it, and a detector that guesses wrong there is worse than no detector.

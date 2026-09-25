@@ -45,6 +45,11 @@ jobs:
           java-version: '21'
           cache: maven
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       # The same promise as above, exercised end to end: the fat jar has to run on a machine that
       # only has a JDK, and it has to find the problems the README claims. This step is also the
       # guard against the quiet ServiceLoader failure: if the shade plugin stops merging
@@ -106,3 +111,19 @@ jobs:
           assert expected <= ids, f"missing rules in JSON: {sorted(expected - ids)}"
           print(f"JSON OK: {len(report['findings'])} findings, rules {sorted(ids)}")
           PY
+
+      # The packaged binary and the npm install are separate promises from the fat jar, and both
+      # have failure modes that no unit test can reach. test-install.mjs builds the app image, packs
+      # the packages, installs from the tarballs and runs the result with no JDK on PATH. The
+      # release workflow runs the same script on all three platforms; running it here too means a
+      # packaging regression shows up on a normal push instead of at release time.
+      - name: Build the self-contained runtime image
+        run: ./scripts/build-runtime.sh
+
+      - name: Verify the npm install works with no Java
+        run: |
+          node npm/scripts/assemble-platform-packages.mjs
+          node npm/scripts/test-install.mjs
+
+      - name: Launcher unit tests
+        run: node --test npm/brewlint/test/

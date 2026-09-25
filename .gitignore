@@ -1,10 +1,11 @@
 # Build output
 target/
-build/
-out/
 *.class
 *.jar
 !.mvn/wrapper/*.jar
+
+# The local Maven build directory holds jpackage staging, not source.
+build/
 
 # Maven wrapper
 .mvn/wrapper/maven-wrapper.jar
@@ -23,6 +24,15 @@ nbproject/
 # Node (npm wrapper, Hito 3)
 node_modules/
 npm/*/node_modules/
+npm/platform/
+npm/brewlint/node_modules/
+package-lock.json
+*.tgz
+
+# Packaging output: a jlink runtime per platform, ~48 MB each. Rebuilt by
+# scripts/build-runtime.sh and the release workflow, never committed.
+dist/
+build/
 
 # OS
 .DS_Store

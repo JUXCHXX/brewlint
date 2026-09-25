@@ -1,0 +1,147 @@
+name: Release
+
+# Publishing is a separate workflow from CI on purpose. CI runs on every push and must stay fast and
+# free; this one creates permanent public artefacts, so it only runs on a tag.
+#
+# Why a matrix at all: jpackage links a launcher for the host OS and architecture, so a macOS machine
+# physically cannot produce a Linux binary. Each target has to be built on that platform. There is
+# no clever workaround, and pretending otherwise is how you ship a package that only works on the
+# maintainer's laptop.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Build and verify, but do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-install:
+    name: Verify the packaged install
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            jpackage-target: macos-aarch64
+            npm-name: macos-arm64
+            arch: arm64
+          - os: ubuntu-latest
+            jpackage-target: linux-x64
+            npm-name: linux-x64
+            arch: x64
+          - os: windows-latest
+            jpackage-target: windows-x64
+            npm-name: win-x64
+            arch: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build and run the tests
+        run: ./mvnw --batch-mode verify
+
+      - name: Build the runtime image
+        run: ./scripts/build-runtime.sh ${{ matrix.jpackage-target }}
+
+      - name: Assemble and pack the npm packages
+        run: node npm/scripts/assemble-platform-packages.mjs --pack
+
+      # The real deliverable of Hito 3. It installs from tarballs the way npm would serve them and
+      # runs the binary with no JDK reachable on PATH, which is the only honest way to check the
+      # claim "installs anywhere, needs no Java".
+      - name: Verify the install works with no Java
+        run: node npm/scripts/test-install.mjs
+
+      - name: Upload the platform package
+        uses: actions/upload-artifact@v4
+        with:
+          name: brewlint-${{ matrix.npm-name }}
+          path: build/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish to npm
+    needs: verify-install
+    runs-on: ubuntu-latest
+    # Only a real tag push publishes. A manual run verifies and stops, so the workflow can be
+    # exercised without creating permanent public packages.
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: npm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: https://registry.npmjs.org
+
+      - name: Read the version from the main package
+        id: version
+        run: echo "version=$(node -p "require('./npm/brewlint/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Collect the platform tarballs built by the matrix
+        uses: actions/download-artifact@v4
+        with:
+          path: tarballs
+          merge-multiple: true
+
+      - name: Pack the main package
+        run: |
+          mkdir -p tarballs
+          cd npm/brewlint
+          npm pack --pack-destination ../../tarballs
+
+      # The platform packages must exist before the main package is published, because the main
+      # package's optionalDependencies name them at exact versions. Publishing it first would give
+      # every user an install that silently downloads nothing.
+      - name: Publish the platform packages
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          PLATFORM_TARBALLS=(tarballs/brewlint-*-"${{ steps.version.outputs.version }}".tgz)
+          if [ ${#PLATFORM_TARBALLS[@]} -eq 0 ]; then
+            echo "::error::no platform tarballs were produced by the matrix"
+            exit 1
+          fi
+          for TARBALL in "${PLATFORM_TARBALLS[@]}"; do
+            echo "::group::publish $TARBALL"
+            npm publish "$TARBALL" --provenance --access public
+            echo "::endgroup::"
+          done
+
+      - name: Publish the main package last
+        run: |
+          set -euo pipefail
+          npm publish "tarballs/brewlint-${{ steps.version.outputs.version }}.tgz" \
+            --provenance --access public
+
+      - name: Verify the published install
+        run: |
+          set -euo pipefail
+          # Install from the registry exactly as a user would, in a directory that has never seen
+          # this repository. Anything less proves nothing about what users actually get.
+          WORKDIR=$(mktemp -d)
+          npm install --prefix "$WORKDIR" --no-audit --no-fund "brewlint@${{ steps.version.outputs.version }}"
+          "$WORKDIR/node_modules/.bin/brewlint" --version
+          # The fixtures are broken on purpose, so exit 1 here is the correct result.
+          "$WORKDIR/node_modules/.bin/brewlint" scan --path "$GITHUB_WORKSPACE/fixtures" --no-color || true

@@ -1,0 +1,43 @@
+{
+  "name": "brewlint",
+  "version": "0.1.0",
+  "description": "Static analysis for Spring Boot anti-patterns. Curated rules with a Java parser, not regex.",
+  "keywords": [
+    "spring-boot",
+    "static-analysis",
+    "linter",
+    "java",
+    "spring",
+    "code-quality",
+    "jpa",
+    "transactions"
+  ],
+  "homepage": "https://github.com/JUXCHXX/brewlint",
+  "bugs": {
+    "url": "https://github.com/JUXCHXX/brewlint/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JUXCHXX/brewlint.git"
+  },
+  "license": "MIT",
+  "author": "JUXCHXX",
+  "bin": {
+    "brewlint": "bin/brewlint.js"
+  },
+  "main": "lib/index.js",
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@brewlint/macos-arm64": "0.1.0",
+    "@brewlint/linux-x64": "0.1.0",
+    "@brewlint/win-x64": "0.1.0"
+  }
+}

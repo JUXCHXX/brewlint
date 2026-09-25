@@ -1,0 +1,73 @@
+'use strict';
+
+/**
+ * Tests for the launcher.
+ *
+ * <p>These run under {@code node --test}, so they need no test framework and no dependency, which
+ * matters for a package whose entire job is to have as few moving parts as possible. The heavier
+ * end-to-end test, which installs from tarballs and runs the real binary, is
+ * {@code npm/scripts/test-install.mjs}.
+ */
+
+const assert = require('node:assert');
+const { test } = require('node:test');
+
+const {
+  BINARIES,
+  binaryFor,
+  binaryPackageName,
+  platformKey,
+  supportedSummary,
+} = require('../lib/platforms.js');
+
+test('the platform key is node platform-arch', () => {
+  assert.strictEqual(platformKey('darwin', 'arm64'), 'darwin-arm64');
+  assert.strictEqual(platformKey('linux', 'x64'), 'linux-x64');
+  assert.strictEqual(platformKey('win32', 'x64'), 'win32-x64');
+});
+
+test('npm package names are ours, not node platform names', () => {
+  // The bug this guards against: deriving the package name from the node platform gives
+  // @brewlint/darwin-arm64, which is not a package that exists. The install succeeds and the
+  // shim then fails, which is a miserable thing to debug.
+  assert.strictEqual(binaryPackageName('darwin', 'arm64'), '@brewlint/macos-arm64');
+  assert.strictEqual(binaryPackageName('linux', 'x64'), '@brewlint/linux-x64');
+  assert.strictEqual(binaryPackageName('win32', 'x64'), '@brewlint/win-x64');
+});
+
+test('an unsupported platform resolves to null rather than throwing', () => {
+  assert.strictEqual(binaryFor('linux', 'arm64'), null);
+  assert.strictEqual(binaryFor('sunos', 'sparc'), null);
+  assert.strictEqual(binaryPackageName('aix', 'ppc64'), null);
+});
+
+test('every shipped platform has both a package name and an executable', () => {
+  for (const [key, entry] of Object.entries(BINARIES)) {
+    assert.ok(entry.packageName, `${key} needs a packageName`);
+    assert.ok(entry.executable, `${key} needs an executable`);
+    assert.ok(entry.description, `${key} needs a description`);
+    assert.ok(entry.executable.startsWith('bin/'), `${key} executable must live under bin/`);
+  }
+});
+
+test('executables are named after the tool, so the layout is predictable', () => {
+  assert.strictEqual(BINARIES['darwin-arm64'].executable, 'bin/brewlint.app/Contents/MacOS/brewlint');
+  assert.strictEqual(BINARIES['linux-x64'].executable, 'bin/brewlint');
+  assert.strictEqual(BINARIES['win32-x64'].executable, 'bin/brewlint.exe');
+});
+
+test('the supported summary lists every platform', () => {
+  const summary = supportedSummary();
+  for (const key of Object.keys(BINARIES)) {
+    assert.ok(summary.includes(key), `summary should mention ${key}`);
+  }
+});
+
+test('the package name matches what the assembler writes', () => {
+  // The assembler names packages @brewlint/<npmName>; this table must agree or npm installs a
+  // package the shim never looks for.
+  const expected = { 'darwin-arm64': 'macos-arm64', 'linux-x64': 'linux-x64', 'win32-x64': 'win-x64' };
+  for (const [key, packageName] of Object.entries(expected)) {
+    assert.strictEqual(BINARIES[key].packageName, packageName);
+  }
+});
