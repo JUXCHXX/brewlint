@@ -10,6 +10,8 @@
  */
 
 const assert = require('node:assert');
+const { existsSync, readFileSync } = require('node:fs');
+const { join, resolve } = require('node:path');
 const { test } = require('node:test');
 
 const {
@@ -69,5 +71,58 @@ test('the package name matches what the assembler writes', () => {
   const expected = { 'darwin-arm64': 'macos-arm64', 'linux-x64': 'linux-x64', 'win32-x64': 'win-x64' };
   for (const [key, packageName] of Object.entries(expected)) {
     assert.strictEqual(BINARIES[key].packageName, packageName);
+  }
+});
+
+// The jpackage app image layout is not stable across platforms: macOS produces a .app bundle, Linux
+// produces a directory named after the app, Windows produces a directory with an .exe at its root.
+// Hardcoding that layout is how a build goes green while producing a package with no binary in it,
+// and the failure then lands on a user's machine at the first run.
+const distDir = resolve(__dirname, '..', '..', '..', 'dist');
+
+function recordedLauncherFor(platform) {
+  const manifest = join(distDir, `launcher-${platform}.txt`);
+  return existsSync(manifest) ? readFileSync(manifest, 'utf8').trim() : null;
+}
+
+test('the launcher paths match what the last build actually produced', (t) => {
+  const platformKeys = {
+    'darwin-arm64': 'macos-arm64',
+    'linux-x64': 'linux-x64',
+    'win32-x64': 'win-x64',
+  };
+  const checked = [];
+
+  for (const [key, platform] of Object.entries(platformKeys)) {
+    const recorded = recordedLauncherFor(platform);
+    if (recorded === null) {
+      continue;
+    }
+    checked.push(platform);
+    assert.strictEqual(
+      BINARIES[key].executable,
+      `bin/${recorded}`,
+      `lib/platforms.js says "${BINARIES[key].executable}" but the ${platform} build produced ` +
+        `"bin/${recorded}". Update the table in lib/platforms.js.`,
+    );
+  }
+
+  if (checked.length === 0) {
+    t.skip('no app image has been built yet; run scripts/build-runtime.sh');
+  } else {
+    t.diagnostic(`checked against a real build of: ${checked.join(', ')}`);
+  }
+});
+
+test('every executable path names a file under bin/', () => {
+  for (const [key, entry] of Object.entries(BINARIES)) {
+    assert.ok(
+      entry.executable.startsWith('bin/'),
+      `${key}: the executable must live under bin/ so the package contains one thing`,
+    );
+    assert.ok(
+      entry.executable.length > 'bin/'.length,
+      `${key}: the executable path must name a file`,
+    );
   }
 });

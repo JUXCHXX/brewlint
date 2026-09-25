@@ -80,13 +80,40 @@ npm_target() {
   esac
 }
 
-# Where the executable sits inside the app image, which differs per platform.
-executable_path() {
-  case "$1" in
-    macos-aarch64) echo "${APP_NAME}.app/Contents/MacOS/${APP_NAME}" ;;
-    linux-x64)     echo "bin/${APP_NAME}" ;;
-    windows-x64)   echo "${APP_NAME}.exe" ;;
-  esac
+# Locates the launcher inside the app image.
+#
+# The layout is NOT stable across platforms or even across jpackage versions, and hardcoding it is a
+# bug that only shows up on a platform you do not own. macOS produces a .app bundle, Linux produces a
+# directory named after the app, Windows produces a directory with an .exe at its root. So the
+# candidates are tried in order and the first one that exists wins.
+#
+# The discovered path is what the npm assembler and the CI assertions read, via
+# dist/launcher-<target>.txt, so there is exactly one source of truth and a layout change cannot make
+# two files disagree.
+find_launcher() {
+  local root="$1" target="$2"
+  local candidates=(
+    "${APP_NAME}/bin/${APP_NAME}"                    # linux
+    "${APP_NAME}/${APP_NAME}.exe"                     # windows
+    "${APP_NAME}.app/Contents/MacOS/${APP_NAME}"      # macos
+    "bin/${APP_NAME}"                                 # flat, older layouts
+    "${APP_NAME}.exe"
+  )
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [ -x "${root}/${candidate}" ]; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+  # Nothing matched. Show what is actually there, because a bare "file not found" on a layout nobody
+  # expected wastes the next twenty minutes.
+  echo "build-runtime: could not find the launcher in ${root}" >&2
+  echo "  looked for:" >&2
+  printf '    %s\n' "${candidates[@]}" >&2
+  echo "  what is actually there:" >&2
+  find "${root}" -maxdepth 3 -type f -perm -u+x 2>/dev/null | head -20 | sed 's/^/    /' >&2
+  return 1
 }
 
 readonly REQUESTED_TARGET="${1:-$(host_target)}"
@@ -153,7 +180,16 @@ jpackage \
 # included for Hito 4, and if a future edit to RUNTIME_MODULES drops it, Hito 4 would fail for npm
 # users only.
 echo "==> Verifying the runtime image"
-ACTUAL_MODULES="$(jimage list "$(find "${APP_IMAGE_DIR}" -name modules -path '*/lib/*' -print -quit)" 2>/dev/null \
+LAUNCHER_RELATIVE="$(find_launcher "${APP_IMAGE_DIR}" "${TARGET}")"
+LAUNCHER="${APP_IMAGE_DIR}/${LAUNCHER_RELATIVE}"
+
+# Record where the launcher ended up. The npm assembler and CI read this, so the app image layout
+# is defined in exactly one place.
+echo "${LAUNCHER_RELATIVE}" > "${DIST_DIR}/launcher-${TARGET}.txt"
+echo "    launcher: ${LAUNCHER_RELATIVE}"
+
+MODULES_FILE="$(find "${APP_IMAGE_DIR}" -name modules -path '*/lib/*' -print -quit)"
+ACTUAL_MODULES="$(jimage list "${MODULES_FILE}" 2>/dev/null \
   | grep '^Module: ' | sed 's/Module: //' | sort | tr '\n' ' ')"
 echo "    modules present: ${ACTUAL_MODULES}"
 
@@ -172,12 +208,6 @@ done
 # The launcher must not need a system Java. Running it with an empty environment is the only honest
 # way to check, because any check that still sees JAVA_HOME proves nothing.
 echo "==> Verifying the launcher runs with no Java on PATH"
-LAUNCHER="${APP_IMAGE_DIR}/$(executable_path "${REQUESTED_TARGET}")"
-[[ -x "${LAUNCHER}" ]] || {
-  echo "build-runtime: expected an executable at ${LAUNCHER}" >&2
-  exit 1
-}
-
 VERSION_OUTPUT="$(env -i PATH=/usr/bin:/bin HOME="${HOME:-/tmp}" "${LAUNCHER}" --version 2>&1)" || {
   echo "build-runtime: the launcher failed to run in a clean environment:" >&2
   echo "${VERSION_OUTPUT}" >&2

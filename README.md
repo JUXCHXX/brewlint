@@ -330,6 +330,15 @@ with inherited stdio. Two things it deliberately gets right:
 release workflow is a matrix over the three runners. `scripts/build-runtime.sh` refuses a target that
 does not match the host with a clear message rather than failing later.
 
+**The app image layout is discovered, not hardcoded.** macOS produces a `.app` bundle, Linux produces
+a directory named after the app, Windows a directory with an `.exe` at its root. The build script
+tries each candidate, prints the directory tree when none match, and writes the path it found to
+`dist/launcher-<target>.txt`. The npm assembler reads that file and fails if it disagrees with the
+table in `lib/platforms.js`, and a unit test asserts the same. Guessing the layout is how a build
+goes green while producing a package with no binary in it, and the failure then lands on a user's
+machine at the first run. This was found by CI on Linux, not by a local build, which is the argument
+for having the matrix at all.
+
 Two constraints the build hit, both now documented in the script:
 
 - A macOS `CFBundleShortVersionString` must start at 1, so the bundle version (`1.0.0`) and the npm

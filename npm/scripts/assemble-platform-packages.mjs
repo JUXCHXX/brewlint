@@ -44,9 +44,12 @@ const mainPackage = JSON.parse(
 );
 const version = mainPackage.version;
 
-async function assemble(target) {
-  const source = join(distDir, target.npmName);
-  if (!existsSync(source)) {
+function source(target) {
+  return join(distDir, target.npmName);
+}
+
+async function assemble(target, launcherPath) {
+  if (!existsSync(source(target))) {
     return { target, status: 'not built' };
   }
 
@@ -57,7 +60,16 @@ async function assemble(target) {
   // "bin/<executable>", and so a platform package contains exactly one thing.
   const binDirectory = join(destination, 'bin');
   await mkdir(binDirectory, { recursive: true });
-  await cp(source, binDirectory, { recursive: true });
+  await cp(source(target), binDirectory, { recursive: true });
+
+  if (launcherPath) {
+    // Recorded in the platform package so the shim's table can be checked against reality rather
+    // than against a comment that says what the layout ought to be.
+    await writeFile(
+      join(destination, 'launcher-path.txt'),
+      `${launcherPath}\n`,
+    );
+  }
 
   const packageJson = {
     name: `@brewlint/${target.npmName}`,
@@ -91,12 +103,37 @@ async function assemble(target) {
     tarball = output.trim().split('\n').pop();
   }
 
-  return { target, status: 'assembled', destination, tarball };
+  return { target, status: 'assembled', destination, tarball, launcherPath };
+}
+
+/**
+ * The launcher's path inside the app image, as recorded by scripts/build-runtime.sh.
+ *
+ * <p>Read rather than hardcoded. The jpackage layout differs per platform (a .app bundle on macOS, a
+ * directory on Linux) and has changed between versions, so guessing it here is how a build ends up
+ * green while producing a package with no binary in it. The build script finds it and writes it down,
+ * and this is the only place that reads it.
+ */
+async function readLauncherPath(target) {
+  const manifest = join(distDir, `launcher-${target.npmName}.txt`);
+  if (!existsSync(manifest)) {
+    return null;
+  }
+  const recorded = (await readFile(manifest, 'utf8')).trim();
+  return recorded.length > 0 ? recorded : null;
 }
 
 const results = [];
 for (const target of TARGETS) {
-  results.push(await assemble(target));
+  const launcherPath = await readLauncherPath(target);
+  if (launcherPath && !existsSync(join(source(target), launcherPath))) {
+    console.error(
+      `  ${target.npmName.padEnd(12)} error: the build recorded the launcher at "${launcherPath}" ` +
+        `but that file is not in dist/${target.npmName}. Rebuild before assembling.`,
+    );
+    process.exit(1);
+  }
+  results.push(await assemble(target, launcherPath));
 }
 
 console.log('');
@@ -120,6 +157,35 @@ const built = results.filter((result) => result.status === 'assembled').length;
 if (built === 0) {
   console.error('No platform packages were assembled. Run scripts/build-runtime.sh first.');
   process.exit(1);
+}
+
+// The shim looks the binary up at the path in lib/platforms.js. If the app image layout is not what
+// that file claims, the install succeeds and then fails at the first run, which is the worst moment
+// to discover it. Comparing the two here turns that into a build failure.
+if (built > 0) {
+  const { BINARIES } = await import(
+    new URL('../brewlint/lib/platforms.js', import.meta.url).href
+  );
+  const key = { 'macos-arm64': 'darwin-arm64', 'linux-x64': 'linux-x64', 'win-x64': 'win32-x64' };
+  const mismatches = [];
+  for (const result of results) {
+    if (result.status !== 'assembled' || !result.launcherPath) continue;
+    const expected = BINARIES[key[result.target.npmName]]?.executable;
+    if (expected && expected !== `bin/${result.launcherPath}`) {
+      mismatches.push(
+        `${result.target.npmName}: lib/platforms.js says "${expected}" but the build produced ` +
+          `"bin/${result.launcherPath}". Update the table in lib/platforms.js.`,
+      );
+    }
+  }
+  if (mismatches.length > 0) {
+    console.error('\nThe launcher path in lib/platforms.js is out of date:');
+    for (const line of mismatches) {
+      console.error(`  ${line}`);
+    }
+    process.exit(1);
+  }
+  console.log('  launcher paths in lib/platforms.js match the build\n');
 }
 if (built < TARGETS.length) {
   console.log(
