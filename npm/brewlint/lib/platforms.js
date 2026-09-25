@@ -25,17 +25,23 @@ const SCOPE = '@brewlint';
 const BINARIES = {
   'darwin-arm64': {
     packageName: 'macos-arm64',
+    // The .app bundle nesting is macOS only. On Linux and Windows jpackage wraps the launcher in a
+    // directory named after the app, which is why those two paths are one level deeper.
+    //
+    // These are not guesses. scripts/build-runtime.sh records what each platform actually produced,
+    // and assemble-platform-packages.mjs fails the build when this table disagrees with that record.
+    // The check found this table being wrong in the first place, on the Linux CI run.
     executable: 'bin/brewlint.app/Contents/MacOS/brewlint',
     description: 'macOS on Apple Silicon',
   },
   'linux-x64': {
     packageName: 'linux-x64',
-    executable: 'bin/brewlint',
+    executable: 'bin/brewlint/bin/brewlint',
     description: 'Linux on x86-64',
   },
   'win32-x64': {
     packageName: 'win-x64',
-    executable: 'bin/brewlint.exe',
+    executable: 'bin/brewlint/brewlint.exe',
     description: 'Windows on x86-64',
   },
 };

@@ -53,9 +53,12 @@ test('every shipped platform has both a package name and an executable', () => {
 });
 
 test('executables are named after the tool, so the layout is predictable', () => {
+  // The macOS path carries a .app bundle. Linux and Windows are one level deeper because jpackage
+  // wraps the launcher in a directory named after the app on those platforms. The authoritative
+  // check is the one against a real build below; this pins the shape.
   assert.strictEqual(BINARIES['darwin-arm64'].executable, 'bin/brewlint.app/Contents/MacOS/brewlint');
-  assert.strictEqual(BINARIES['linux-x64'].executable, 'bin/brewlint');
-  assert.strictEqual(BINARIES['win32-x64'].executable, 'bin/brewlint.exe');
+  assert.strictEqual(BINARIES['linux-x64'].executable, 'bin/brewlint/bin/brewlint');
+  assert.strictEqual(BINARIES['win32-x64'].executable, 'bin/brewlint/brewlint.exe');
 });
 
 test('the supported summary lists every platform', () => {
