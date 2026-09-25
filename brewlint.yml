@@ -1,0 +1,25 @@
+# Configuration for scanning Brewlint's own sources.
+#
+# fixtures/ is excluded on purpose: it holds deliberately broken Spring code, so scanning it
+# without asking for it would report twelve findings that are supposed to be there. CI scans it
+# explicitly instead (see FixturesScanTest and .github/workflows/ci.yml), which is the point.
+#
+# This file is also the reference for the configuration format. See README.md.
+
+exclude:
+  - "fixtures/**"
+  - "**/generated/**"
+
+rules:
+  # Proxy-dependent Spring annotations on a method Spring cannot proxy. Nothing here is a
+  # judgement call, so it stays on at its own severity.
+  AOP001:
+    enabled: true
+
+  # Resources that nothing closes. Downgraded rather than disabled: running `brewlint scan .` on
+  # this repository reports four RES001 warnings, all PrintWriter/StringWriter instances in test
+  # code where not closing them is harmless. Keeping them visible is the point, but they should
+  # not turn every build red.
+  RES001:
+    enabled: true
+    severity: WARNING

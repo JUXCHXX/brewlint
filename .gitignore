@@ -1,0 +1,32 @@
+# Build output
+target/
+build/
+out/
+*.class
+*.jar
+!.mvn/wrapper/*.jar
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+nbproject/
+
+# Node (npm wrapper, Hito 3)
+node_modules/
+npm/*/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Brewlint output
+brewlint-report.pdf
