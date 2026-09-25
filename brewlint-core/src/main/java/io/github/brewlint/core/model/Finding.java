@@ -19,6 +19,7 @@ import java.util.Objects;
  * @param endLine    1-based line where the offending construct ends
  * @param message    what is wrong, in one sentence
  * @param suggestion how to fix it, in one sentence
+ * @param source     whether a rule or a language model produced this. See {@link FindingSource}.
  */
 public record Finding(
         String ruleId,
@@ -29,7 +30,28 @@ public record Finding(
         int column,
         int endLine,
         String message,
-        String suggestion) implements Comparable<Finding> {
+        String suggestion,
+        FindingSource source) implements Comparable<Finding> {
+
+    /**
+     * A finding from a rule, which is every finding the engine produces on its own.
+     *
+     * <p>Present so that the engine, the rules and the tests do not all have to spell out
+     * {@link FindingSource#RULE}, and so a rule cannot accidentally claim to be the AI.
+     */
+    public Finding(
+            String ruleId,
+            String category,
+            Severity severity,
+            String filePath,
+            int line,
+            int column,
+            int endLine,
+            String message,
+            String suggestion) {
+        this(ruleId, category, severity, filePath, line, column, endLine, message, suggestion,
+                FindingSource.RULE);
+    }
 
     public Finding {
         Objects.requireNonNull(ruleId, "ruleId");
@@ -38,6 +60,7 @@ public record Finding(
         Objects.requireNonNull(filePath, "filePath");
         Objects.requireNonNull(message, "message");
         Objects.requireNonNull(suggestion, "suggestion");
+        Objects.requireNonNull(source, "source");
         if (line < 1) {
             throw new IllegalArgumentException("line must be 1-based, got " + line);
         }
@@ -46,9 +69,12 @@ public record Finding(
         }
     }
 
-    /** Orders findings by descending severity, then by location, then by rule id. */
+    /** Orders findings by descending severity, then by source, then by location, then by rule id. */
     private static final Comparator<Finding> ORDER = Comparator
             .comparingInt((Finding finding) -> -finding.severity().weight())
+            // Proven findings first at the same severity. A reader who is scanning the report for
+            // things to act on should meet the certain ones before the suggested ones.
+            .thenComparing(finding -> finding.source().ordinal())
             .thenComparing(Finding::filePath)
             .thenComparingInt(Finding::line)
             .thenComparingInt(Finding::column)

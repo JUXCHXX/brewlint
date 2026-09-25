@@ -9,8 +9,8 @@ runs out of file descriptors under load, in a completely different part of the s
 throws, neither logs, and neither is caught by a code review that reads for intent rather than
 mechanics.
 
-> **Status: Hitos 1 to 3 complete.** Eight rules, a self-contained binary, a CLI with terminal and
-> JSON output, 260 Java tests and 26 packaging checks. See [Roadmap](#roadmap) for what is next.
+> **Status: Hitos 1 to 4 complete.** Eight rules, a self-contained binary, an optional AI pass with
+> two providers, 354 Java tests and 26 packaging checks. See [Roadmap](#roadmap) for what is next.
 
 ---
 
@@ -91,6 +91,11 @@ brewlint scan [options]
       --no-color          Never emit ANSI escapes.
       --color             Always emit ANSI escapes, even when piped.
       --list-rules        Print every rule and exit.
+
+  --ai <provider>         anthropic or ollama. Off by default. See "The optional AI pass".
+      --ai-model <id>     Model id for --ai.
+      --ai-max-findings <n>   How many findings to ask about. Default: 50.
+      --ai-max-lines <n>       How many lines of code to send. Default: 1200.
 ```
 
 Exit codes are a contract with CI:
@@ -141,6 +146,60 @@ $ python3 -c "import json; print(len(json.load(open('report.json'))['findings'])
 JSON is never truncated by `--max-findings`. A client reading a partial array would have to guess
 whether there were no more findings or whether the output was cut off, which is exactly the
 ambiguity that makes a machine-readable format untrustworthy.
+
+Every finding carries a `source` of `RULE` or `AI`, so a consumer can always tell a proven finding
+from a suggested one. "Fix everything at ERROR" is a different instruction depending on which it
+is.
+
+## The optional AI pass
+
+Curated rules catch what the syntax tree can prove. They cannot catch that a `@Transactional`
+boundary is in the wrong place *for this codebase*, or that a cache is invalidated somewhere the
+rules do not look. A language model can read the code and say so. That is the whole of the feature,
+and it is strictly additive.
+
+```bash
+brewlint scan --path src                                  # rules only, always complete
+ANTHROPIC_API_KEY=... brewlint scan --path src --ai anthropic
+ollama serve && brewlint scan --path src --ai ollama      # nothing leaves the machine
+```
+
+**It is never required.** `brewlint-core` does not depend on `brewlint-ai`, and there is a test
+that runs the engine with the AI module off the classpath entirely. A provider that is missing,
+unconfigured or unreachable produces a warning on stderr and the complete rule report, with the
+exit code the rules alone would have produced. If a scan produced different findings depending on
+whether a model was reachable, the report would be lying about how much the rules found.
+
+**It never outranks the rules.** A rule can justify an `ERROR` because it decided something. A
+model claiming an `ERROR` is a model claiming to have decided something, so every AI finding is
+capped at `WARNING` and marked `AI001`. A suggestion for a file that was not part of the scan is
+dropped, because a report that points at a line which does not exist is worse than saying nothing.
+
+**Nothing leaves silently.** `--ai` must be named, the key comes from `ANTHROPIC_API_KEY` and is
+never written to disk, and every byte of code goes through `SecretRedactor` first. Redaction
+removes PEM blocks, cloud and provider keys, JWTs, tokens with recognisable prefixes, credentials
+embedded in connection URLs, and a generic layer for `password = "..."` style assignments. It keeps
+the name and the scheme, so the report still says a secret was on that line without saying what it
+was.
+
+What redaction cannot do is find a secret shaped like nothing in particular, a password typed as a
+bare string literal in the middle of a method. That is why `--ai ollama` is a first-class option
+rather than a fallback: for code that cannot leave, "nothing leaves the machine" is a guarantee and
+"we redacted the things we recognise" is not.
+
+**Both providers ask the same question.** `ReviewPrompt` is shared, and a test asserts the two
+providers receive a byte-identical prompt, so comparing results across machines compares the model
+rather than the wording.
+
+**Bounded by construction.** `maxFindings` and `maxExcerptLines` are part of `AiRequest`, not
+settings, so a provider cannot ignore them. The most common way an optional AI feature goes wrong
+is not a security problem, it is a cost one.
+
+Progress messages go to **stderr**, always. Writing them to stdout would corrupt `--format json`,
+and a report that is syntactically invalid because of a status line breaks the consumer silently.
+
+The transport is an interface, so every provider test runs with a stub and no network, no API key
+and no bill. Not covered by tests: a live call to either API.
 
 ## Configuration
 
@@ -289,13 +348,17 @@ provider shipped, and then fail only for npm users, which is the worst possible 
 ```
 brewlint/
 ├── brewlint-core/     Parser, rule engine, plugin contract, finding model, config, project index.
-│                      No terminal, no PDF, no CLI. Reused by every consumer.
-├── brewlint-ai/       Placeholder for Hito 4. Anthropic + Ollama, opt-in.
+│                      No terminal, no PDF, no CLI, and deliberately no AI. Reused by every consumer.
+├── brewlint-ai/       Optional AI pass: AiProvider contract, Anthropic, Ollama, secret redaction.
 ├── brewlint-report/   ReportRenderer contract + terminal + JSON.
-├── brewlint-cli/      picocli, exit codes, produces the fat jar.
+├── brewlint-cli/      picocli, exit codes, --ai wiring, produces the fat jar.
 └── fixtures/          A deliberately broken Spring project. NOT a Maven module:
                        it must never compile.
 ```
+
+`brewlint-ai` depends on `brewlint-core`; `brewlint-core` does not depend on `brewlint-ai`. That one
+direction is what keeps the report complete when no provider is configured, and there is a test that
+runs the engine with the AI module off the classpath entirely.
 
 `fixtures/` is excluded from the Maven reactor on purpose. It holds code that is broken by design,
 and keeping it out of `<modules>` means nothing ever tries to compile it and no test can
@@ -308,8 +371,8 @@ accidentally depend on it building.
 | 1 | Scaffolding, rule engine, `AOP001`, `RES001`, CLI, terminal report, CI | **done** |
 | 2 | `TX002`, `TX003`, `RES002`, `BEAN001`-`003`, shared `AopProxyability`, JSON output, project index | **done** |
 | 3 | `jlink` runtime per platform, npm wrapper, install with no Java needed | **done, pending publish** |
-| 4 | `AiProvider` interface, Anthropic, local Ollama, secret redaction | next |
-| 5 | PDF report via OpenHTMLtoPDF | planned |
+| 4 | `AiProvider` contract, Anthropic, local Ollama, secret redaction | **done** |
+| 5 | PDF report via OpenHTMLtoPDF | next |
 | 6 | VS Code extension rendering findings as Diagnostics | planned |
 | 7 | GitHub Action commenting on pull requests | planned |
 | 8 | N+1 detection, scoped to the unambiguous pattern | planned |

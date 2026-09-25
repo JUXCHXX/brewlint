@@ -91,6 +91,10 @@ public final class JsonReportRenderer implements ReportRenderer {
         return "{" + String.join(Json.separator(),
                 Json.field("ruleId", finding.ruleId()),
                 Json.field("category", finding.category()),
+                // Present from the first release of the format. A consumer has to be able to tell a
+                // proven finding from a suggested one, because "fix everything at ERROR" is a
+                // different instruction depending on which it is.
+                Json.field("source", finding.source().name()),
                 Json.field("severity", finding.severity().name()),
                 Json.field("file", finding.filePath()),
                 Json.field("line", finding.line()),

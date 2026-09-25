@@ -23,6 +23,12 @@
       <groupId>io.github.brewlint</groupId>
       <artifactId>brewlint-report</artifactId>
     </dependency>
+    <!-- Only the CLI knows about the AI module. The engine does not, which is what keeps the
+         report complete when no provider is configured. -->
+    <dependency>
+      <groupId>io.github.brewlint</groupId>
+      <artifactId>brewlint-ai</artifactId>
+    </dependency>
     <dependency>
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>

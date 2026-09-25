@@ -1,5 +1,9 @@
 package io.github.brewlint.cli;
 
+import io.github.brewlint.ai.AiProvider;
+import io.github.brewlint.ai.AiReviewService;
+import io.github.brewlint.ai.anthropic.AnthropicProvider;
+import io.github.brewlint.ai.ollama.OllamaProvider;
 import io.github.brewlint.core.Brewlint;
 import io.github.brewlint.core.config.BrewlintConfig;
 import io.github.brewlint.core.config.ConfigLoader;
@@ -20,7 +24,9 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.Callable;
 
 /**
@@ -101,6 +107,29 @@ public final class BrewlintCli implements Callable<Integer> {
                 description = "Write the report to this file instead of standard output.")
         Path output;
 
+        @Option(names = "--ai",
+                paramLabel = "<provider>",
+                description = "Run an extra review pass through a language model: anthropic (your "
+                        + "API key, code leaves the machine) or ollama (local, nothing leaves). "
+                        + "Never on by default, and the report is complete without it.")
+        String aiProvider;
+
+        @Option(names = "--ai-model",
+                paramLabel = "<id>",
+                description = "Model id for --ai. Check GET https://api.anthropic.com/v1/models, or "
+                        + "run `ollama list`.")
+        String aiModel;
+
+        @Option(names = "--ai-max-findings",
+                paramLabel = "<n>",
+                description = "How many findings to ask the model about. Default: 50.")
+        int aiMaxFindings = AiReviewService.DEFAULT_MAX_FINDINGS;
+
+        @Option(names = "--ai-max-lines",
+                paramLabel = "<n>",
+                description = "How many lines of code to send. Default: 1200.")
+        int aiMaxLines = AiReviewService.DEFAULT_MAX_EXCERPT_LINES;
+
         @CommandLine.Spec
         CommandLine.Model.CommandSpec spec;
 
@@ -138,6 +167,12 @@ public final class BrewlintCli implements Callable<Integer> {
                         AnalysisEngine.withDefaultRules(projectRoot, config, Brewlint.version());
                 AnalysisResult result = engine.analyze(files);
 
+                // The AI pass is additive and optional. It runs after the deterministic scan and can
+                // only add to the result, so a failure here cannot reduce what the rules found.
+                if (aiProvider != null) {
+                    result = withAi(result, files, projectRoot);
+                }
+
                 ReportOptions options = new ReportOptions(
                         AnsiSupport.isColorEnabled(noColor, forceColor),
                         maxFindings,
@@ -152,6 +187,78 @@ public final class BrewlintCli implements Callable<Integer> {
                 spec.commandLine().getErr().flush();
                 return EXIT_ERROR;
             }
+        }
+
+        /**
+         * Runs the optional AI pass and merges whatever it adds.
+         *
+         * <p>A provider that is missing, misconfigured or unreachable produces a warning and the
+         * unchanged deterministic result. That is the whole contract of the feature: the report is
+         * complete without it, and losing it must not be an error.
+         *
+         * <p>Every progress message goes to stderr. Writing them to stdout would corrupt
+         * {@code --format json}, and a report that is syntactically invalid because of a status
+         * line is worse than no status line: it breaks the consumer silently, and the consumer is
+         * the VS Code extension or a CI job that has no way to tell a truncated report from a
+         * broken one.
+         */
+        private AnalysisResult withAi(
+                AnalysisResult result, List<Path> files, Path projectRoot) {
+
+            AiProvider provider = providerFor(aiProvider, aiModel);
+            PrintWriter progress = spec.commandLine().getErr();
+
+            if (provider == null || !provider.isConfigured()) {
+                progress.println("brewlint: AI pass skipped: "
+                        + (provider == null
+                                ? "unknown provider '" + aiProvider + "'. Expected: anthropic, ollama."
+                                : provider.name() + " is not configured.")
+                        + " The report is the complete set of rule findings.");
+                progress.flush();
+                return result;
+            }
+
+            progress.print("brewlint: asking " + provider.name() + " (" + provider.model() + ") ... ");
+            progress.flush();
+
+            AiReviewService.Outcome outcome = AiReviewService.review(
+                    provider, result, files, projectRoot, aiMaxFindings, aiMaxLines);
+
+            if (outcome.failed()) {
+                progress.println("skipped");
+                progress.println("brewlint: AI pass failed: " + outcome.failureReason());
+                progress.println("brewlint: the report is the complete set of rule findings.");
+                progress.flush();
+                return result;
+            }
+
+            progress.println(outcome.additionalFindings().size() + " suggestion(s), "
+                    + outcome.verdicts().size() + " verdict(s)");
+            progress.flush();
+
+            if (outcome.additionalFindings().isEmpty() && outcome.verdicts().isEmpty()) {
+                return result;
+            }
+
+            List<io.github.brewlint.core.model.Finding> merged = new ArrayList<>(result.findings());
+            merged.addAll(outcome.additionalFindings());
+            merged.sort(null);
+
+            return new io.github.brewlint.core.model.AnalysisResult(
+                    List.copyOf(merged),
+                    result.filesScanned(),
+                    result.filesWithParseErrors(),
+                    result.duration(),
+                    result.toolVersion());
+        }
+
+        /** Builds the requested provider, or null for an unknown name. */
+        private AiProvider providerFor(String name, String model) {
+            return switch (name.trim().toLowerCase(Locale.ROOT)) {
+                case "anthropic" -> AnthropicProvider.builder().model(model).build();
+                case "ollama" -> OllamaProvider.builder().model(model).build();
+                default -> null;
+            };
         }
 
         private void write(AnalysisResult result, ReportOptions options) throws IOException {

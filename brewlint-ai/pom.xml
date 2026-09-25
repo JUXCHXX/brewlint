@@ -12,5 +12,23 @@
 
   <artifactId>brewlint-ai</artifactId>
   <name>Brewlint :: AI</name>
-  <description>Placeholder for Hito 4: the AiProvider contract, the Anthropic provider and the local Ollama provider. Intentionally empty until then.</description>
+  <description>Optional AI pass: an Anthropic provider and a local Ollama provider, behind one contract.</description>
+
+  <dependencies>
+    <!-- One direction only. brewlint-core must never depend on this module, or the engine could
+         come to require a provider and the report would stop being complete without a key. -->
+    <dependency>
+      <groupId>io.github.brewlint</groupId>
+      <artifactId>brewlint-core</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+    </dependency>
+  </dependencies>
 </project>
