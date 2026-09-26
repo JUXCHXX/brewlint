@@ -1,6 +1,6 @@
 {
   "name": "brewlint",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Static analysis for Spring Boot anti-patterns. Curated rules with a Java parser, not regex.",
   "keywords": [
     "spring-boot",
@@ -36,8 +36,8 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "brewlint-macos-arm64": "0.1.0",
-    "brewlint-linux-x64": "0.1.0",
-    "brewlint-win-x64": "0.1.0"
+    "brewlint-macos-arm64": "0.1.1",
+    "brewlint-linux-x64": "0.1.1",
+    "brewlint-win-x64": "0.1.1"
   }
 }

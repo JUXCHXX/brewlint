@@ -30,11 +30,8 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly DIST_DIR="${PROJECT_ROOT}/dist"
 
-# The version of the npm package, and the version of the macOS bundle.
-# These are deliberately different numbers. npm is happy with 0.x, which is what a pre-1.0 tool
-# should say, but a macOS CFBundleShortVersionString must start at 1 or jpackage rejects it with
-# "The first number in an app-version cannot be zero or negative". One variable, two vocabularies.
-readonly PACKAGE_VERSION="${PACKAGE_VERSION:-0.1.0}"
+# The macOS bundle version, which jpackage rejects if the first number is zero. Deliberately a
+# different number from the tool's: npm is happy with 0.x, CFBundleShortVersionString is not.
 readonly BUNDLE_VERSION="${BUNDLE_VERSION:-1.0.0}"
 
 # The version of the tool itself: the jar's file name, the version stamped inside it, and the version

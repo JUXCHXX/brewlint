@@ -17,8 +17,9 @@ inputs:
     description: >-
       Version of the brewlint package to run. Pinned by default, because an action whose analysis
       changes because someone published a release is an action whose checks change with no commit.
+      Bumping this is part of cutting a release, not something the action does for itself.
     required: false
-    default: '0.1.0'
+    default: '0.1.1'
   fail-on:
     description: >-
       Lowest severity that fails the check: ERROR, WARNING, INFO or NONE. Findings below the
