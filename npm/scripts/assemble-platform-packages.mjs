@@ -95,15 +95,28 @@ async function assemble(target, launcherPath) {
 
   let tarball = null;
   if (pack) {
-    const output = execFileSync('npm', ['pack', '--pack-destination', join(projectRoot, 'build')], {
-      cwd: destination,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'inherit'],
-    });
-    tarball = output.trim().split('\n').pop();
+    tarball = packPackage(destination);
   }
 
   return { target, status: 'assembled', destination, tarball, launcherPath };
+}
+
+/**
+ * Runs `npm pack` and returns the file it produced.
+ *
+ * <p>With `shell: true` on Windows, because npm is a .cmd there and spawnSync cannot execute a
+ * .cmd without a shell. The `{windowsHide: true}` keeps a console window from flashing on every
+ * call. Everywhere else the binary is invoked directly, so a path with a space in it stays a single
+ * argument instead of being word-split by a shell.
+ */
+function packPackage(cwd) {
+  const useShell = process.platform === 'win32';
+  const output = execFileSync(
+    'npm',
+    ['pack', '--pack-destination', join(projectRoot, 'build')],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], shell: useShell, windowsHide: true },
+  );
+  return output.trim().split('\n').pop();
 }
 
 /**

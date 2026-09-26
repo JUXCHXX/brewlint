@@ -46,6 +46,21 @@ function check(description, condition, detail = '') {
   }
 }
 
+
+// On Windows npm is a .cmd, which spawnSync cannot execute without a shell. Every call to npm goes
+// through here so that difference lives in one place instead of at four call sites, and so a path
+// with a space in it stays a single argument everywhere else.
+const NPM_OPTIONS = {
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'inherit'],
+  shell: process.platform === 'win32',
+  windowsHide: true,
+};
+
+function npm(args, options = {}) {
+  return execFileSync('npm', args, { ...NPM_OPTIONS, ...options });
+}
+
 function section(title) {
   console.log(`\n${title}`);
 }
@@ -77,18 +92,15 @@ try {
   // Step 1: pack. Packing rather than copying is the point: it applies the `files` allowlist, which
   // is the thing that silently omits a file in every Node project ever published.
   section('1. npm pack');
-  const mainTarball = execFileSync(
-    'npm',
-    ['pack', '--pack-destination', tarballDir],
-    { cwd: mainPackageDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
-  ).trim().split('\n').pop();
+  const mainTarball = npm(['pack', '--pack-destination', tarballDir], { cwd: mainPackageDir })
+    .trim()
+    .split('\n')
+    .pop();
 
   const platformTarballs = [];
   for (const name of assembled) {
-    const packed = execFileSync('npm', ['pack', '--pack-destination', tarballDir], {
+    const packed = npm(['pack', '--pack-destination', tarballDir], {
       cwd: join(platformDir, name),
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'inherit'],
     }).trim().split('\n').pop();
     platformTarballs.push(join(tarballDir, packed));
   }
@@ -109,8 +121,7 @@ try {
 
   // Step 3: install into a clean prefix, exactly as a global install would.
   section('3. install into a clean prefix');
-  execFileSync(
-    'npm',
+  npm(
     [
       'install',
       '--prefix',
@@ -121,7 +132,6 @@ try {
       join(tarballDir, mainTarball),
       ...platformTarballs,
     ],
-    { stdio: ['ignore', 'pipe', 'inherit'] },
   );
 
   const installedShim = join(installDir, 'node_modules', '.bin', 'brewlint');
