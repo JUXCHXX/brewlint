@@ -116,13 +116,34 @@ jobs:
     # exercised without creating permanent public packages.
     if: startsWith(github.ref, 'refs/tags/v')
     environment: npm
+    permissions:
+      # For OIDC trusted publishing. Harmless while the token below is what actually authenticates:
+      # the npm CLI detects an OIDC environment and prefers it, and falls back to the token when
+      # there is no matching trusted publisher configured on the package.
+      id-token: write
+      contents: read
+    env:
+      # NOT optional, and its absence went unnoticed for three milestones. setup-node writes an
+      # .npmrc pointing at this variable, and a dry run skips this job entirely, so nothing ever
+      # exercised the authentication path: every run of this workflow that was supposed to publish
+      # would have failed with ENEEDAUTH even with a valid token. The dry runs proved the packaging
+      # works, which is a real thing, and they proved nothing at all about publishing.
+      #
+      # Delete this line once the trusted publisher is configured on all four packages. An empty
+      # NODE_AUTH_TOKEN left in .npmrc is worse than no line at all, so this is removed rather than
+      # left to fall back to an empty string.
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Node 24, not 20. Trusted publishing requires npm CLI 11.5.1+ and Node 22.14.0+, and
+          # node 20 ships npm 10, which has no OIDC support at all. Bumped now rather than at the
+          # moment of switching to OIDC, because the version is what makes the switch possible and
+          # a version bump is not something to discover during a release.
+          node-version: '24'
           registry-url: https://registry.npmjs.org
 
       - name: Read the version from the main package
