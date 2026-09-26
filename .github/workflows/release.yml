@@ -115,24 +115,17 @@ jobs:
     # Only a real tag push publishes. A manual run verifies and stops, so the workflow can be
     # exercised without creating permanent public packages.
     if: startsWith(github.ref, 'refs/tags/v')
+    # Kept even though it holds no secret any more. It is the manual approval gate in front of an
+    # irreversible action, and it is also the environment name the npm trusted publisher is
+    # configured against, so removing it would break authentication as well as the gate.
     environment: npm
     permissions:
-      # For OIDC trusted publishing. Harmless while the token below is what actually authenticates:
-      # the npm CLI detects an OIDC environment and prefers it, and falls back to the token when
-      # there is no matching trusted publisher configured on the package.
+      # The whole of the authentication. OIDC trusted publishing: GitHub mints a short-lived,
+      # workflow-scoped token and npm exchanges it for a publish token scoped to the exact
+      # repository, workflow and environment configured on the package. There is no long-lived
+      # credential anywhere in this repository, and the npm account has tokens disabled.
       id-token: write
       contents: read
-    env:
-      # NOT optional, and its absence went unnoticed for three milestones. setup-node writes an
-      # .npmrc pointing at this variable, and a dry run skips this job entirely, so nothing ever
-      # exercised the authentication path: every run of this workflow that was supposed to publish
-      # would have failed with ENEEDAUTH even with a valid token. The dry runs proved the packaging
-      # works, which is a real thing, and they proved nothing at all about publishing.
-      #
-      # Delete this line once the trusted publisher is configured on all four packages. An empty
-      # NODE_AUTH_TOKEN left in .npmrc is worse than no line at all, so this is removed rather than
-      # left to fall back to an empty string.
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -144,11 +137,32 @@ jobs:
           # moment of switching to OIDC, because the version is what makes the switch possible and
           # a version bump is not something to discover during a release.
           node-version: '24'
+          # Kept, with no token to go with it. This writes the registry into .npmrc so the CLI knows
+          # where to exchange the OIDC token, which is the documented shape for trusted publishing.
+          # It also leaves an unresolved ${NODE_AUTH_TOKEN} in that file, which npm ignores once it
+          # sees the OIDC environment; the account has tokens disabled, so there is nothing for it
+          # to fall back to and nothing to fall back to.
           registry-url: https://registry.npmjs.org
 
       - name: Read the version from the main package
         id: version
-        run: echo "version=$(node -p "require('./npm/brewlint/package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./npm/brewlint/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # The tag decides that this runs; the manifest decides what gets published. If they
+          # disagree, the run republishes the manifest's version under a different tag, and npm
+          # rejects the first attempt as a version that already exists. Failing here says which of
+          # the two is wrong, instead of leaving a half-finished release to work out from a 403.
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$TAG_VERSION" != "$VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the manifest version $VERSION"
+            echo "  Bump npm/brewlint/package.json (and the three optionalDependencies) to $TAG_VERSION," >&2
+            echo "  or tag v$VERSION instead." >&2
+            exit 1
+          fi
+          echo "    tag $GITHUB_REF_NAME matches manifest $VERSION"
 
       - name: Collect the platform tarballs built by the matrix
         uses: actions/download-artifact@v4
@@ -229,5 +243,34 @@ jobs:
           WORKDIR=$(mktemp -d)
           npm install --prefix "$WORKDIR" --no-audit --no-fund "brewlint@${{ steps.version.outputs.version }}"
           "$WORKDIR/node_modules/.bin/brewlint" --version
+
+          # The platform package has to be there, not just the main one. npm skips an optional
+          # dependency whose os and cpu do not match, so a main package that installs cleanly while
+          # silently pulling down no binary at all is a passing result that means nothing. The
+          # launcher resolving the binary is the proof that optionalDependencies still line up
+          # with the shim's platform table, which is the seam the scope rename cut.
+          PLATFORM_PACKAGE=$(node -p "
+            Object.keys(require('$WORKDIR/node_modules/brewlint/package.json').optionalDependencies)
+              .find((name) => {
+                const manifest = require('$WORKDIR/node_modules/' + name + '/package.json');
+                return manifest.os.includes(process.platform) && manifest.cpu.includes(process.arch);
+              }) ?? ''
+          ")
+          if [ -z "$PLATFORM_PACKAGE" ]; then
+            echo "::error::no platform package matched this runner, so the install carries no binary"
+            exit 1
+          fi
+          echo "    platform package: $PLATFORM_PACKAGE"
+
           # The fixtures are broken on purpose, so exit 1 here is the correct result.
           "$WORKDIR/node_modules/.bin/brewlint" scan --path "$GITHUB_WORKSPACE/fixtures" --no-color || true
+
+          # The PDF is the feature most likely to break on a jlink module list, so it is checked
+          # here from the published package rather than only from a build.
+          "$WORKDIR/node_modules/.bin/brewlint" scan --path "$GITHUB_WORKSPACE/fixtures" \
+            --format pdf --output "$WORKDIR/report.pdf" --fail-on none
+          head -c 5 "$WORKDIR/report.pdf" | grep -q '%PDF-' || {
+            echo "::error::the published binary could not render a PDF"
+            exit 1
+          }
+          echo "    pdf report: ok ($(du -h "$WORKDIR/report.pdf" | cut -f1))"
