@@ -78,6 +78,10 @@ jobs:
           require_output "the recorded launcher path" "dist/launcher-${{ matrix.npm-name }}.txt"
 
       - name: Assemble and pack the npm packages
+        # bash for the same reason as the step above: these steps source a bash script and use bash
+        # guards, and PowerShell rejects `set -euo pipefail` outright. Every step that touches
+        # scripts/ci-guard.sh has to declare it.
+        shell: bash
         run: |
           set -euo pipefail
           source scripts/ci-guard.sh
@@ -90,6 +94,7 @@ jobs:
       # runs the binary with no JDK reachable on PATH, which is the only honest way to check the
       # claim "installs anywhere, needs no Java".
       - name: Verify the install works with no Java
+        shell: bash
         run: |
           set -euo pipefail
           source scripts/ci-guard.sh

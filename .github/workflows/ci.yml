@@ -32,6 +32,8 @@ jobs:
 
   self-check:
     name: Self-check on fixtures
+    # Deliberately not a matrix. Everything here is platform-independent, and running it on one
+    # runner keeps the log readable. The steps that DO differ per platform live in release.yml.
     runs-on: ubuntu-latest
     needs: build
 
