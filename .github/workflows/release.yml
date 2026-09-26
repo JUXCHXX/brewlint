@@ -25,6 +25,12 @@ jobs:
   verify-install:
     name: Verify the packaged install
     runs-on: ${{ matrix.os }}
+    # Declared once for the whole job rather than per step. Every step here sources a bash script
+    # and uses `set -euo pipefail`, and PowerShell rejects the latter outright. Declaring it at the
+    # step level is a rule a new step can forget; declaring it here is a rule that cannot be missed.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -58,13 +64,11 @@ jobs:
       - name: Build and run the tests
         run: ./mvnw --batch-mode verify
 
+      # PowerShell also resolves a bare relative path against the working directory while bash
+      # resolves it against $PATH first, so `Run ./scripts/build-runtime.sh` found no script, exited
+      # 0 with no output, and the failure only surfaced three steps later as "no platform packages
+      # were assembled". The guards are what make that class of silent failure impossible.
       - name: Build the runtime image
-        # bash rather than the Windows default, PowerShell: PowerShell resolves a bare relative path
-        # against the working directory while bash resolves it against $PATH first, so
-        # `Run ./scripts/build-runtime.sh` found no script, exited 0 with no output, and the failure
-        # only surfaced three steps later as "no platform packages were assembled". The guard below
-        # is what makes that class of silent failure impossible from here on.
-        shell: bash
         run: |
           set -euo pipefail
           source scripts/ci-guard.sh
@@ -78,10 +82,6 @@ jobs:
           require_output "the recorded launcher path" "dist/launcher-${{ matrix.npm-name }}.txt"
 
       - name: Assemble and pack the npm packages
-        # bash for the same reason as the step above: these steps source a bash script and use bash
-        # guards, and PowerShell rejects `set -euo pipefail` outright. Every step that touches
-        # scripts/ci-guard.sh has to declare it.
-        shell: bash
         run: |
           set -euo pipefail
           source scripts/ci-guard.sh
@@ -94,7 +94,6 @@ jobs:
       # runs the binary with no JDK reachable on PATH, which is the only honest way to check the
       # claim "installs anywhere, needs no Java".
       - name: Verify the install works with no Java
-        shell: bash
         run: |
           set -euo pipefail
           source scripts/ci-guard.sh
