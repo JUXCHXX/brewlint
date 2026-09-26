@@ -1,0 +1,79 @@
+{
+  "name": "brewlint",
+  "displayName": "Brewlint",
+  "description": "Spring Boot anti-patterns as you type: private @Transactional methods, unclosed resources, field injection, and more, as Diagnostics.",
+  "version": "0.1.0",
+  "publisher": "JUXCHXX",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JUXCHXX/brewlint.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0",
+    "node": ">=20"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "spring",
+    "spring boot",
+    "java",
+    "linter",
+    "anti-pattern"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/*.java"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "brewlint.rescan",
+        "title": "Brewlint: Rescan",
+        "category": "Brewlint"
+      },
+      {
+        "command": "brewlint.showOutput",
+        "title": "Brewlint: Show output",
+        "category": "Brewlint"
+      }
+    ],
+    "configuration": {
+      "title": "Brewlint",
+      "properties": {
+        "brewlint.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Analyse the project and report findings as Diagnostics."
+        },
+        "brewlint.debounce": {
+          "type": "number",
+          "default": 500,
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Milliseconds to wait after a save before rescanning. A rescan of a large project is not instant, and 0 turns every save into a full analysis."
+        },
+        "brewlint.scanTimeout": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "description": "Milliseconds before a scan is abandoned. The project-level message says so rather than leaving the Problems panel stale with no explanation."
+        },
+        "brewlint.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a Brewlint binary to use instead of the bundled one. Leave empty unless you are testing a build. The bundle needs no Java and is the supported path."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "brewlint": "0.1.0"
+  }
+}

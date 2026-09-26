@@ -52,6 +52,25 @@ jobs:
         with:
           node-version: '20'
 
+      # The VS Code extension, tested against the published npm package rather than a local build.
+      #
+      # That is the point: the extension's whole premise is that a user installs "brewlint" from the
+      # registry and gets a working binary with no Java. Testing it against a jar built in the same
+      # job would prove nothing about that, and would keep passing if the published package broke.
+      # It also runs the 87 MB download on every push, which is the price of checking the promise
+      # rather than asserting it.
+      - name: The VS Code extension works against the published package
+        run: |
+          set -euo pipefail
+          source scripts/ci-guard.sh
+          cd editors/vscode
+          npm install --no-audit --no-fund --loglevel error
+          node --test test/ 2>&1 | tee test.log
+          require_success_marker "fail 0" "a VS Code extension test failed" test.log
+          # The entry point the extension resolves the binary through. If this throws, the extension
+          # activates and then does nothing, which looks identical to "no findings".
+          node -e "console.log('  binary: ' + require('brewlint').binaryPath())"
+
       # The same promise as above, exercised end to end: the fat jar has to run on a machine that
       # only has a JDK, and it has to find the problems the README claims. This step is also the
       # guard against the quiet ServiceLoader failure: if the shade plugin stops merging

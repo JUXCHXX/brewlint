@@ -29,6 +29,10 @@ npm/brewlint/node_modules/
 package-lock.json
 *.tgz
 
+# The VS Code extension, Hito 6. Its node_modules holds the published brewlint package, which is
+# 87 MB of runtime, and is installed by CI rather than committed. No lockfile: the extension
+# deliberately depends on the published version range so the tests run against what users get.
+
 # Packaging output: a jlink runtime per platform, ~48 MB each. Rebuilt by
 # scripts/build-runtime.sh and the release workflow, never committed.
 dist/

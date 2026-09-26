@@ -61,6 +61,19 @@ jobs:
         with:
           node-version: '20'
 
+      # The tag is the authority on what version this build is. A manual dry run is on a branch, and
+      # a branch name is not a version, so it gets the development one.
+      - name: Work out the version to stamp
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            REVISION="${GITHUB_REF_NAME#v}"
+          else
+            REVISION="0.1.0-SNAPSHOT"
+          fi
+          echo "REVISION=${REVISION}" >> "$GITHUB_ENV"
+          echo "    ${GITHUB_REF_NAME} -> ${REVISION}"
+
       - name: Build and run the tests
         run: ./mvnw --batch-mode verify
 
@@ -78,6 +91,11 @@ jobs:
           # code path that needs it runs. Assert the log says so, rather than trusting that it did.
           require_success_marker "pdf report: ok" "the packaged binary could not render a PDF" dist-build.log
           require_success_marker "json report: ok" "the packaged binary could not render JSON" dist-build.log
+          # The binary stamped with the version being released, checked from the log the build
+          # already produced. A package published under one number and containing a binary that
+          # reports another is untraceable, and it happened once.
+          require_success_marker "brewlint ${REVISION}" \
+            "the packaged binary was not stamped with the version being released" dist-build.log
           require_output "the runtime image" "dist/${{ matrix.npm-name }}/**/*"
           require_output "the recorded launcher path" "dist/launcher-${{ matrix.npm-name }}.txt"
 

@@ -1,0 +1,12 @@
+# Everything that is not needed to run the extension.
+#
+# The tests are the reason a source checkout installs anything at all: src/scan.test.js runs the real
+# binary, so the package it needs is a runtime dependency, not a dev one. node_modules stays in.
+node_modules/.cache/
+node_modules/**/*.map
+.vscode-test/
+*.vsix
+test/
+.gitignore
+.eslintrc*
+tsconfig.json

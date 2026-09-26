@@ -37,6 +37,14 @@ readonly DIST_DIR="${PROJECT_ROOT}/dist"
 readonly PACKAGE_VERSION="${PACKAGE_VERSION:-0.1.0}"
 readonly BUNDLE_VERSION="${BUNDLE_VERSION:-1.0.0}"
 
+# The version of the tool itself: the jar's file name, the version stamped inside it, and the version
+# it must report when asked. One variable, because two is how the first release shipped a binary
+# that said "brewlint 0.1.0-SNAPSHOT" inside an npm package numbered 0.1.0. A user reporting a bug
+# then has to work out which of the two numbers to quote.
+#
+# The release workflow sets REVISION from the tag. A local build gets the development version.
+readonly REVISION="${REVISION:-0.1.0-SNAPSHOT}"
+
 # The modules baked into the runtime.
 #
 # java.base       the language itself
@@ -139,9 +147,12 @@ command -v jpackage >/dev/null || {
 
 # Step 1: the runnable jar.
 echo "==> Building the jar"
-(cd "${PROJECT_ROOT}" && ./mvnw --batch-mode -q -DskipTests package)
+# -Drevision, not a hand-written version, so the stamped version and the file name below cannot
+# disagree. They did once, and the only symptom was a published binary naming a version nobody could
+# find.
+(cd "${PROJECT_ROOT}" && ./mvnw --batch-mode -q -DskipTests "-Drevision=${REVISION}" package)
 
-readonly JAR_NAME="brewlint-cli-${VERSION:-0.1.0-SNAPSHOT}.jar"
+readonly JAR_NAME="brewlint-cli-${REVISION}.jar"
 readonly JAR_PATH="${PROJECT_ROOT}/brewlint-cli/target/${JAR_NAME}"
 [[ -f "${JAR_PATH}" ]] || {
   echo "build-runtime: expected ${JAR_PATH} to exist after packaging" >&2
@@ -252,6 +263,18 @@ VERSION_OUTPUT="$(env -i PATH=/usr/bin:/bin HOME="${HOME:-/tmp}" "${LAUNCHER}" -
   exit 1
 }
 echo "    ${VERSION_OUTPUT}"
+
+# The whole line, compared exactly. Not `grep -F "$REVISION"`, which is the version of this check
+# that let the original bug through: "0.1.0" is a substring of "0.1.0-SNAPSHOT", so a binary
+# reporting the wrong version satisfied a guard written to catch exactly that.
+if [ "${VERSION_OUTPUT}" != "brewlint ${REVISION}" ]; then
+  echo "build-runtime: the binary reports a different version than it was built as." >&2
+  echo "  expected: brewlint ${REVISION}" >&2
+  echo "  got:      ${VERSION_OUTPUT}" >&2
+  echo "  The jar name, the version stamped inside it and the version it reports all come from" >&2
+  echo "  REVISION. If they disagree, something built the jar with a different revision." >&2
+  exit 1
+fi
 
 echo
 echo "==> Built ${TARGET}"

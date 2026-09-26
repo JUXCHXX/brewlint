@@ -6,7 +6,7 @@
 
   <groupId>io.github.brewlint</groupId>
   <artifactId>brewlint-parent</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>${revision}</version>
   <packaging>pom</packaging>
 
   <name>Brewlint</name>
@@ -30,6 +30,13 @@
        It holds deliberately broken Spring code and must never be compiled. -->
 
   <properties>
+    <!--
+      The one version in the build. CI passes -Drevision=<x.y.z> so a release is stamped
+      with the version it is published as. Without this, the npm package said 0.1.0 while
+      the binary it shipped reported 0.1.0-SNAPSHOT, and a user reporting a bug has to
+      work out which of the two numbers to quote.
+      -->
+    <revision>0.1.0-SNAPSHOT</revision>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <maven.compiler.release>21</maven.compiler.release>

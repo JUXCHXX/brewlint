@@ -12,9 +12,9 @@ runs out of file descriptors under load, in a completely different part of the s
 throws, neither logs, and neither is caught by a code review that reads for intent rather than
 mechanics.
 
-> **Status: Hitos 1 to 5 complete.** Eight rules, a self-contained binary, an optional AI pass with
-> two providers, terminal, JSON and PDF reports, 387 Java tests and 26 packaging checks. See
-> [Roadmap](#roadmap) for what is next.
+> **Status: Hitos 1 to 6 complete.** Eight rules, a self-contained binary, an optional AI pass with
+> two providers, terminal, JSON and PDF reports, a VS Code extension, 387 Java tests, 41 extension
+> tests and 26 packaging checks. See [Roadmap](#roadmap) for what is next.
 
 ---
 
@@ -154,6 +154,44 @@ ambiguity that makes a machine-readable format untrustworthy.
 Every finding carries a `source` of `RULE` or `AI`, so a consumer can always tell a proven finding
 from a suggested one. "Fix everything at ERROR" is a different instruction depending on which it
 is.
+
+## The VS Code extension
+
+Findings as you type, as Diagnostics in the Problems panel.
+
+```bash
+code --install-extension JUXCHXX.brewlint
+```
+
+The extension depends on the `brewlint` npm package, so it brings its own runtime and needs no Java
+on your machine. It resolves the binary through the same `binaryPath()` the npm launcher uses, which
+is the reason that export exists.
+
+Three decisions in it are worth stating, because each one is a bug someone will otherwise write:
+
+**A project with findings is not a failure.** Brewlint exits 1 when it finds something over the
+threshold, which for a linter is the ordinary successful outcome. Treating non-zero as an error
+throws away every finding the tool just produced and shows you an error instead of your code. Only
+exit 2 means it could not run.
+
+**A failed scan does not clear the panel.** If the binary is missing or the project cannot be
+analysed, the previous findings stay and the reason goes to the output channel and a status bar
+item. Replacing them with an empty Problems panel is the worst failure available: it tells you your
+code is clean at the exact moment the tool stopped being able to tell.
+
+**Whole-project problems are not diagnostics.** A missing binary, a scan that could not run, a file
+that did not parse: none of them belong to a source line, and attaching them to an invented URI puts
+a phantom file in your Problems panel.
+
+The extension is thin on purpose. `report.js`, `diagnostics.js` and `scan.js` do not import `vscode`,
+so they are tested with `node --test` against the real binary in the repository's own harness;
+`extension.js` is the only file that talks to the editor. That is why the exit-code contract, the
+line-number conversion and the JSON schema are covered by 41 tests that run in a second, rather than
+by tests that need an editor to start.
+
+Those tests download the published package rather than building one, so they fail if npm is serving
+something broken. The extension's whole premise is that installing `brewlint` gives you a working
+analyser, and only installing it can check that.
 
 ## The PDF report
 
@@ -395,6 +433,8 @@ brewlint/
 ├── brewlint-ai/       Optional AI pass: AiProvider contract, Anthropic, Ollama, secret redaction.
 ├── brewlint-report/   ReportRenderer contract + terminal, JSON and PDF renderers.
 ├── brewlint-cli/      picocli, exit codes, --ai wiring, produces the fat jar.
+├── editors/vscode/    The VS Code extension. Not Java: it spawns the published binary and
+│                      renders its JSON as Diagnostics.
 └── fixtures/          A deliberately broken Spring project. NOT a Maven module:
                        it must never compile.
 ```
@@ -416,7 +456,7 @@ accidentally depend on it building.
 | 3 | `jlink` runtime per platform, npm wrapper, install with no Java needed | **done, pending publish** |
 | 4 | `AiProvider` contract, Anthropic, local Ollama, secret redaction | **done** |
 | 5 | PDF report via OpenHTMLtoPDF | **done** |
-| 6 | VS Code extension rendering findings as Diagnostics | next |
+| 6 | VS Code extension rendering findings as Diagnostics | **done** |
 | 7 | GitHub Action commenting on pull requests | planned |
 | 8 | N+1 detection, scoped to the unambiguous pattern | planned |
 

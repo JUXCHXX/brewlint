@@ -7,7 +7,7 @@
   <parent>
     <groupId>io.github.brewlint</groupId>
     <artifactId>brewlint-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>${revision}</version>
   </parent>
 
   <artifactId>brewlint-cli</artifactId>
