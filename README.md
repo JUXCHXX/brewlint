@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="brewlintlogo.png" alt="Brewlint" width="120" />
+  <img src="brewlintlogo.png" alt="Brewlint" width="500" />
 
   # Brewlint
 
