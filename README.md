@@ -1,8 +1,6 @@
 <div align="center">
   <img src="brewlintlogo.png" alt="Brewlint" width="500" />
 
-  # Brewlint
-
   **Análisis estático para anti-patrones de Spring Boot.** Reglas curadas con un parser real de Java, no con expresiones regulares.
 
   [![CI](https://github.com/JUXCHXX/brewlint/actions/workflows/ci.yml/badge.svg)](https://github.com/JUXCHXX/brewlint/actions/workflows/ci.yml)
