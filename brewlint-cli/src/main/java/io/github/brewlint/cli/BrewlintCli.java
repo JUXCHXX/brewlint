@@ -13,6 +13,7 @@ import io.github.brewlint.core.model.AnalysisResult;
 import io.github.brewlint.core.model.Severity;
 import io.github.brewlint.report.JsonReportRenderer;
 import io.github.brewlint.report.ReportOptions;
+import io.github.brewlint.report.PdfReportRenderer;
 import io.github.brewlint.report.ReportRenderer;
 import io.github.brewlint.report.TerminalReportRenderer;
 import picocli.CommandLine;
@@ -51,6 +52,9 @@ public final class BrewlintCli implements Callable<Integer> {
     public static final int EXIT_CLEAN = 0;
     public static final int EXIT_FINDINGS = 1;
     public static final int EXIT_ERROR = 2;
+
+    /** Default destination when --format pdf is used without --output. */
+    static final String DEFAULT_PDF_NAME = "brewlint-report.pdf";
 
     @CommandLine.Spec
     CommandLine.Model.CommandSpec spec;
@@ -99,13 +103,19 @@ public final class BrewlintCli implements Callable<Integer> {
 
         @Option(names = "--format",
                 paramLabel = "<format>",
-                description = "Output format: terminal or json. Default: terminal.")
+                description = "Output format: terminal, json or pdf. Default: terminal.")
         String format = "terminal";
 
         @Option(names = {"-o", "--output"},
                 paramLabel = "<file>",
-                description = "Write the report to this file instead of standard output.")
+                description = "Write the report to this file instead of standard output. "
+                        + "Required for --format pdf, which is binary.")
         Path output;
+
+        @Option(names = "--title",
+                paramLabel = "<text>",
+                description = "Title for the PDF report. Default: the project directory name.")
+        String title;
 
         @Option(names = "--ai",
                 paramLabel = "<provider>",
@@ -135,6 +145,9 @@ public final class BrewlintCli implements Callable<Integer> {
 
         private final ReportRenderer terminalRenderer = new TerminalReportRenderer();
         private final ReportRenderer jsonRenderer = new JsonReportRenderer();
+        // Concrete, not the interface: writePdf needs the Path overload, which render(..) cannot
+        // express because a PDF is binary.
+        private final PdfReportRenderer pdfRenderer = new PdfReportRenderer();
 
         @Override
         public Integer call() {
@@ -143,6 +156,11 @@ public final class BrewlintCli implements Callable<Integer> {
 
         public Integer run() {
             Path projectRoot = path.toAbsolutePath().normalize();
+
+            // The format is validated first, before anything expensive or anything that writes.
+            // Discovered late, a typo in --format would have cost a full scan of the project, and
+            // --format pdf would have left a file behind for a command that could never succeed.
+            ReportRenderer renderer = rendererFor(format);
 
             if (listRules) {
                 printRules(projectRoot);
@@ -262,6 +280,8 @@ public final class BrewlintCli implements Callable<Integer> {
         }
 
         private void write(AnalysisResult result, ReportOptions options) throws IOException {
+            // Already resolved and validated at the top of run(); re-resolved here only to keep the
+            // method self-contained, and it cannot fail.
             ReportRenderer renderer = rendererFor(format);
             // JSON is never truncated. A client that reads a partial findings array has to
             // distinguish "there were no more findings" from "output was cut off", which is exactly
@@ -269,6 +289,11 @@ public final class BrewlintCli implements Callable<Integer> {
             ReportOptions effective = "json".equals(renderer.format())
                     ? options.withMaxFindings(null)
                     : options;
+
+            if ("pdf".equals(renderer.format())) {
+                writePdf(result);
+                return;
+            }
 
             if (output == null) {
                 renderer.render(result, effective, spec.commandLine().getOut());
@@ -283,12 +308,33 @@ public final class BrewlintCli implements Callable<Integer> {
             }
         }
 
+        /**
+         * A PDF is binary and goes to a file, never to stdout.
+         *
+         * <p>Writing binary to a terminal corrupts the terminal, and writing it into a StringBuilder
+         * produces a file that is not a PDF. A sensible default destination is supplied rather than
+         * making it an error to forget, because the destination is not the interesting decision here.
+         */
+        private void writePdf(AnalysisResult result) throws IOException {
+            Path destination = output != null ? output : Path.of(DEFAULT_PDF_NAME);
+            pdfRenderer.write(result, destination);
+
+            PrintWriter out = spec.commandLine().getOut();
+            long findings = result.findings().size();
+            out.println();
+            out.println("  Wrote " + findings + (findings == 1 ? " finding" : " findings")
+                    + " to " + destination.toAbsolutePath());
+            out.println();
+            out.flush();
+        }
+
         private ReportRenderer rendererFor(String requested) {
-            return switch (requested.toLowerCase(java.util.Locale.ROOT)) {
+            return switch (requested.toLowerCase(Locale.ROOT)) {
                 case "terminal" -> terminalRenderer;
                 case "json" -> jsonRenderer;
+                case "pdf" -> pdfRenderer;
                 default -> throw new IllegalArgumentException(
-                        "Unknown format '" + requested + "'. Expected: terminal, json");
+                        "Unknown format '" + requested + "'. Expected: terminal, json, pdf");
             };
         }
 
@@ -352,6 +398,22 @@ public final class BrewlintCli implements Callable<Integer> {
     }
 
     public static void main(String[] args) {
-        System.exit(new CommandLine(new BrewlintCli()).execute(args));
+        System.exit(commandLine().execute(args));
+    }
+
+    /**
+     * The command line as configured for real use.
+     *
+     * <p>Exposed so the tests exercise the same exception handling as the binary instead of
+     * reimplementing it. Without this, a test can pass while the real command prints a stack trace
+     * for a bad {@code --format}, because {@code execute} reports an uncaught exception through
+     * picocli's own handler and writes to the real stderr.
+     */
+    static CommandLine commandLine() {
+        return new CommandLine(new BrewlintCli())
+                .setExecutionExceptionHandler((exception, command, parseResult) -> {
+                    command.getErr().println(Brewlint.NAME + ": " + exception.getMessage());
+                    return EXIT_ERROR;
+                });
     }
 }

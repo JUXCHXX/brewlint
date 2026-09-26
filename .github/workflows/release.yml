@@ -59,16 +59,42 @@ jobs:
         run: ./mvnw --batch-mode verify
 
       - name: Build the runtime image
-        run: ./scripts/build-runtime.sh ${{ matrix.jpackage-target }}
+        # bash rather than the Windows default, PowerShell: PowerShell resolves a bare relative path
+        # against the working directory while bash resolves it against $PATH first, so
+        # `Run ./scripts/build-runtime.sh` found no script, exited 0 with no output, and the failure
+        # only surfaced three steps later as "no platform packages were assembled". The guard below
+        # is what makes that class of silent failure impossible from here on.
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/ci-guard.sh
+          ./scripts/build-runtime.sh ${{ matrix.jpackage-target }} | tee dist-build.log
+          # The script renders both report formats from the packaged binary before it exits, because
+          # a jlink image is closed at build time and a missing JDK module only shows up when the
+          # code path that needs it runs. Assert the log says so, rather than trusting that it did.
+          require_success_marker "pdf report: ok" "the packaged binary could not render a PDF" dist-build.log
+          require_success_marker "json report: ok" "the packaged binary could not render JSON" dist-build.log
+          require_output "the runtime image" "dist/{{ matrix.npm-name }}/**/*"
+          require_output "the recorded launcher path" "dist/launcher-{{ matrix.npm-name }}.txt"
 
       - name: Assemble and pack the npm packages
-        run: node npm/scripts/assemble-platform-packages.mjs --pack
+        run: |
+          set -euo pipefail
+          source scripts/ci-guard.sh
+          node npm/scripts/assemble-platform-packages.mjs --pack | tee assemble.log
+          require_output "the platform package" "npm/platform/{{ matrix.npm-name }}/package.json"
+          require_success_marker "match the build" "the launcher path table is out of date" assemble.log
+          require_output "the npm tarball" "build/*.tgz"
 
       # The real deliverable of Hito 3. It installs from tarballs the way npm would serve them and
       # runs the binary with no JDK reachable on PATH, which is the only honest way to check the
       # claim "installs anywhere, needs no Java".
       - name: Verify the install works with no Java
-        run: node npm/scripts/test-install.mjs
+        run: |
+          set -euo pipefail
+          source scripts/ci-guard.sh
+          node npm/scripts/test-install.mjs | tee install.log
+          require_success_marker "PASS" "the npm install verification did not pass" install.log
 
       - name: Upload the platform package
         uses: actions/upload-artifact@v4

@@ -19,6 +19,13 @@
       <groupId>io.github.brewlint</groupId>
       <artifactId>brewlint-core</artifactId>
     </dependency>
+    <!-- Hito 5. HTML is laid out by this library and turned into a PDF by PDFBox, rather than
+         placing every line of text by hand. Code excerpts need real font metrics to wrap and to
+         keep a monospace column aligned, and PDFBox brings that measurement with it. -->
+    <dependency>
+      <groupId>com.openhtmltopdf</groupId>
+      <artifactId>openhtmltopdf-pdfbox</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>

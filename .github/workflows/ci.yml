@@ -88,12 +88,28 @@ jobs:
             exit 1
           }
 
+      # A PDF that exists but is not a PDF is the failure mode worth guarding. The renderer writes
+      # binary, and "it produced a file" is not the same claim as "it produced a document".
+      - name: The PDF report must be a real PDF
+        run: |
+          set -euo pipefail
+          source scripts/ci-guard.sh
+          JAR=$(ls brewlint-cli/target/brewlint-cli-*.jar | head -1)
+          java -jar "$JAR" scan --path fixtures --format pdf --output report.pdf --fail-on none
+          require_output "the PDF report" report.pdf
+          head -c 5 report.pdf | grep -q '%PDF-' || {
+            echo "::error::report.pdf is not a PDF"
+            exit 1
+          }
+          echo "    ok ($(du -h report.pdf | cut -f1))"
+
       # The JSON output is the contract Hito 6 (VS Code) and Hito 7 (GitHub Action) will be written
       # against. Checking it parses here means a broken serializer fails the build now, rather than
       # after those clients are built on top of it.
       - name: The JSON output must be valid and complete
         run: |
           set -euo pipefail
+          source scripts/ci-guard.sh
           JAR=$(ls brewlint-cli/target/brewlint-cli-*.jar | head -1)
           java -jar "$JAR" scan --path fixtures --format json --output report.json || true
           python3 - <<'PY'

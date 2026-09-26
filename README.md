@@ -12,8 +12,9 @@ runs out of file descriptors under load, in a completely different part of the s
 throws, neither logs, and neither is caught by a code review that reads for intent rather than
 mechanics.
 
-> **Status: Hitos 1 to 4 complete.** Eight rules, a self-contained binary, an optional AI pass with
-> two providers, 354 Java tests and 26 packaging checks. See [Roadmap](#roadmap) for what is next.
+> **Status: Hitos 1 to 5 complete.** Eight rules, a self-contained binary, an optional AI pass with
+> two providers, terminal, JSON and PDF reports, 387 Java tests and 26 packaging checks. See
+> [Roadmap](#roadmap) for what is next.
 
 ---
 
@@ -87,7 +88,7 @@ brewlint scan [options]
 
   -p, --path <dir>        Directory or single .java file. Default: current directory.
   -c, --config <file>     Path to brewlint.yml. Default: <path>/brewlint.yml.
-      --format <format>   terminal or json. Default: terminal.
+      --format <format>   terminal, json or pdf. Default: terminal.
   -o, --output <file>     Write the report to a file instead of standard output.
       --fail-on <sev>     Exit 1 at or above this severity: ERROR, WARNING, INFO, NONE.
       --max-findings <n>  Print at most n findings. The summary still counts them all.
@@ -153,6 +154,36 @@ ambiguity that makes a machine-readable format untrustworthy.
 Every finding carries a `source` of `RULE` or `AI`, so a consumer can always tell a proven finding
 from a suggested one. "Fix everything at ERROR" is a different instruction depending on which it
 is.
+
+## The PDF report
+
+The one you attach to a pull request or send to a team.
+
+```bash
+brewlint scan --path src --format pdf --output report.pdf
+brewlint scan --path src --format pdf          # writes brewlint-report.pdf
+```
+
+A PDF is binary, so it goes to a file and never to a terminal. `render(..)` throws rather than
+writing bytes into a `StringBuilder`, because a renderer that quietly produces mojibake in a buffer
+is worse than one that fails clearly.
+
+Built by rendering HTML with OpenHTMLtoPDF rather than placing every line by hand. The reason is
+wrapping: a message, a path and a Java identifier all have to wrap at a sensible point, and a
+text-drawing API gives neither for free.
+
+**Colour never carries meaning alone.** A red error and a green line are identical to a reader with
+any form of colour blindness, and to someone photocopying the report. Every severity is written out
+in words as well as coloured, the summary is a table of numbers rather than a row of coloured boxes,
+and an AI finding says "suggested by a model, unverified" in text.
+
+**It needs two more JDK modules than the CLI does.** A `jlink` image is closed at build time, so the
+first version of this feature passed every test and died for every npm user with
+`NoClassDefFoundError: org/xml/sax/SAXException`: PDF rendering parses HTML, and
+`java.xml` is not in a minimal image. `java.desktop` came with it for font metrics, taking the
+runtime from 48 MB to 87 MB. `build-runtime.sh` now renders both report formats **from the packaged
+binary** before declaring success, and the CI matrix asserts that log line, because a module list
+that is only documented is a list that will drift.
 
 ## The optional AI pass
 
@@ -362,7 +393,7 @@ brewlint/
 ├── brewlint-core/     Parser, rule engine, plugin contract, finding model, config, project index.
 │                      No terminal, no PDF, no CLI, and deliberately no AI. Reused by every consumer.
 ├── brewlint-ai/       Optional AI pass: AiProvider contract, Anthropic, Ollama, secret redaction.
-├── brewlint-report/   ReportRenderer contract + terminal + JSON.
+├── brewlint-report/   ReportRenderer contract + terminal, JSON and PDF renderers.
 ├── brewlint-cli/      picocli, exit codes, --ai wiring, produces the fat jar.
 └── fixtures/          A deliberately broken Spring project. NOT a Maven module:
                        it must never compile.
@@ -384,8 +415,8 @@ accidentally depend on it building.
 | 2 | `TX002`, `TX003`, `RES002`, `BEAN001`-`003`, shared `AopProxyability`, JSON output, project index | **done** |
 | 3 | `jlink` runtime per platform, npm wrapper, install with no Java needed | **done, pending publish** |
 | 4 | `AiProvider` contract, Anthropic, local Ollama, secret redaction | **done** |
-| 5 | PDF report via OpenHTMLtoPDF | next |
-| 6 | VS Code extension rendering findings as Diagnostics | planned |
+| 5 | PDF report via OpenHTMLtoPDF | **done** |
+| 6 | VS Code extension rendering findings as Diagnostics | next |
 | 7 | GitHub Action commenting on pull requests | planned |
 | 8 | N+1 detection, scoped to the unambiguous pattern | planned |
 

@@ -41,15 +41,20 @@ readonly BUNDLE_VERSION="${BUNDLE_VERSION:-1.0.0}"
 #
 # java.base       the language itself
 # java.logging    java.util.logging, which the engine uses to report unparseable files
-# java.net.http   the HTTP client Hito 4's Anthropic provider will need
+# java.net.http   the HTTP client the Anthropic provider uses
 # jdk.crypto.ec   the TLS cipher suites java.net.http needs for HTTPS
+# java.xml        SAX and the XML parser, which the PDF renderer needs to parse its own HTML
+# java.desktop   font metrics and font configuration, which PDFBox needs to measure and embed text
 #
-# java.net.http and jdk.crypto.ec are here for a feature that does not exist yet, and that is
-# deliberate. A jlink image is closed at build time. If they were left out, the packaged binary
-# would work perfectly until Hito 4 shipped, and then every npm user would get a
-# NoClassDefFoundError that nobody running ./mvnw would ever reproduce. The list is verified at the
-# end of this script, so removing a module by accident fails here rather than in a user's terminal.
-readonly RUNTIME_MODULES="java.base,java.logging,java.net.http,jdk.crypto.ec"
+# The last two arrived with Hito 5 and were found the hard way. The packaged binary threw
+# NoClassDefFoundError: org/xml/sax/SAXException on the first PDF render, while every test passed,
+# because a Maven build has the whole JDK and a jlink image does not. A jlink image is closed at
+# build time, so a missing module cannot be discovered at run time by anything that does not need it.
+#
+# That is why this list is verified here and not just documented: the last three lines of this file
+# run every module check, and the build script also renders a real PDF from the packaged binary
+# before declaring success. See verify_report_from_image below.
+readonly RUNTIME_MODULES="java.base,java.logging,java.net.http,jdk.crypto.ec,java.xml,java.desktop"
 
 readonly MAIN_CLASS="io.github.brewlint.cli.BrewlintCli"
 readonly APP_NAME="brewlint"
@@ -193,7 +198,7 @@ ACTUAL_MODULES="$(jimage list "${MODULES_FILE}" 2>/dev/null \
   | grep '^Module: ' | sed 's/Module: //' | sort | tr '\n' ' ')"
 echo "    modules present: ${ACTUAL_MODULES}"
 
-for required in java.base java.logging java.net.http jdk.crypto.ec; do
+for required in java.base java.logging java.net.http jdk.crypto.ec java.xml java.desktop; do
   case " ${ACTUAL_MODULES} " in
     *" ${required} "*) ;;
     *)
@@ -204,6 +209,39 @@ for required in java.base java.logging java.net.http jdk.crypto.ec; do
       ;;
   esac
 done
+
+# Every optional feature has to be exercised from the packaged binary, because a jlink image is
+# closed at build time and a missing module only shows up when the code path that needs it runs.
+# The alternative is finding out from a user.
+echo "==> Verifying the JSON report from the packaged binary"
+JSON_PROBE="$(env -i PATH=/usr/bin:/bin HOME="${HOME:-/tmp}" "${LAUNCHER}" \
+  scan --path "${SCRIPT_DIR}/../fixtures" --format json --fail-on none 2>/dev/null || true)"
+case "${JSON_PROBE}" in
+  *'"findings"'*)
+    echo "    json report: ok"
+    ;;
+  *)
+    echo "build-runtime: the packaged binary could not produce a JSON report." >&2
+    echo "  A module it needs is probably missing from RUNTIME_MODULES." >&2
+    exit 1
+    ;;
+esac
+
+echo "==> Verifying the PDF report from the packaged binary"
+PDF_PROBE="$(mktemp -d)/probe.pdf"
+env -i PATH=/usr/bin:/bin HOME="${HOME:-/tmp}" "${LAUNCHER}" \
+  scan --path "${SCRIPT_DIR}/../fixtures" --format pdf --output "${PDF_PROBE}" --fail-on none \
+  >/dev/null 2>&1 || true
+if [ -s "${PDF_PROBE}" ] && [ "$(head -c 5 "${PDF_PROBE}")" = "%PDF-" ]; then
+  echo "    pdf report: ok ($(du -h "${PDF_PROBE}" | cut -f1))"
+else
+  echo "build-runtime: the packaged binary could not produce a PDF." >&2
+  echo "  PDF rendering needs java.xml and java.desktop, which a jlink image does not carry by" >&2
+  echo "  default. Check RUNTIME_MODULES at the top of this script." >&2
+  rm -f "${PDF_PROBE}"
+  exit 1
+fi
+rm -f "${PDF_PROBE}"
 
 # The launcher must not need a system Java. Running it with an empty environment is the only honest
 # way to check, because any check that still sees JAVA_HOME proves nothing.
