@@ -255,11 +255,34 @@ jobs:
 
       - name: Verify the published install
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # Install from the registry exactly as a user would, in a directory that has never seen
           # this repository. Anything less proves nothing about what users actually get.
+          #
+          # With a retry, because the registry does not serve a version the instant it is published.
+          # npm scans a new version for malware before making it available, and on v0.1.1 that took
+          # about two minutes. Installing once, immediately, failed with ETARGET on a release that
+          # had in fact published all four packages perfectly: a red build reporting a success.
+          #
+          # That failure mode is worse than a false negative, because the instinct on seeing a red
+          # release is to re-run it, and re-running republishes a version that already exists. So the
+          # wait is here, with a bound, and it still fails if the version really is not there.
+          VERSION="${{ steps.version.outputs.version }}"
+          ATTEMPT=0
+          until npm view "brewlint@$VERSION" version >/dev/null 2>&1; do
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ "$ATTEMPT" -ge 20 ]; then
+              echo "::error::brewlint@$VERSION is still not on the registry after 20 attempts"
+              exit 1
+            fi
+            [ "$ATTEMPT" -eq 1 ] && echo "    waiting for the registry to serve $VERSION..."
+            sleep 15
+          done
+          echo "    registry has brewlint@$VERSION (after $ATTEMPT attempt(s))"
+          set -e
+
           WORKDIR=$(mktemp -d)
-          npm install --prefix "$WORKDIR" --no-audit --no-fund "brewlint@${{ steps.version.outputs.version }}"
+          npm install --prefix "$WORKDIR" --no-audit --no-fund "brewlint@$VERSION"
           "$WORKDIR/node_modules/.bin/brewlint" --version
 
           # The platform package has to be there, not just the main one. npm skips an optional
