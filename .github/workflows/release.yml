@@ -162,6 +162,41 @@ jobs:
           cd npm/brewlint
           npm pack --pack-destination ../../tarballs
 
+      # Every tarball is proved publishable before any of them is published for real.
+      #
+      # `npm publish <path>` takes a package *specifier*, not a filename. A bare relative path
+      # containing a slash is GitHub shorthand, so `tarballs/brewlint-linux-x64-0.1.0.tgz` was
+      # resolved as owner=tarballs, repo=brewlint-linux-x64-0.1.0.tgz, and npm tried to
+      # `git clone ssh://git@github.com/tarballs/...` and failed with a publickey error. The
+      # tarball existed and was valid; the argument was read as something else entirely.
+      #
+      # This step is the reason that bug can never reach a real publish again. `npm publish
+      # --dry-run` parses the same specifier, resolves it, and prints the manifest, without
+      # contacting the registry. The release path was exercised by dry runs of the workflow for
+      # three milestones and none of them got here, because the publish job is skipped on a
+      # non-tag ref. A guard that only runs in the one situation it is guarding is not a guard.
+      - name: Prove every tarball is publishable
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          ALL_TARBALLS=(tarballs/*.tgz)
+          if [ ${#ALL_TARBALLS[@]} -eq 0 ]; then
+            echo "::error::no tarballs were produced by the matrix"
+            exit 1
+          fi
+          for TARBALL in "${ALL_TARBALLS[@]}"; do
+            # Absolute, never bare-relative: npa treats a slashed relative path as GitHub
+            # shorthand, and an absolute path cannot be mistaken for anything else.
+            ABSOLUTE="$GITHUB_WORKSPACE/$TARBALL"
+            echo "::group::dry-run $TARBALL"
+            npm publish "$ABSOLUTE" --dry-run --access public 2>&1 | grep -E "^npm notice (name|version):" || {
+              echo "::error::$TARBALL is not a publishable package"
+              exit 1
+            }
+            echo "::endgroup::"
+          done
+          echo "    all ${#ALL_TARBALLS[@]} tarballs are publishable"
+
       # The platform packages must exist before the main package is published, because the main
       # package's optionalDependencies name them at exact versions. Publishing it first would give
       # every user an install that silently downloads nothing.
@@ -176,14 +211,14 @@ jobs:
           fi
           for TARBALL in "${PLATFORM_TARBALLS[@]}"; do
             echo "::group::publish $TARBALL"
-            npm publish "$TARBALL" --provenance --access public
+            npm publish "$GITHUB_WORKSPACE/$TARBALL" --provenance --access public
             echo "::endgroup::"
           done
 
       - name: Publish the main package last
         run: |
           set -euo pipefail
-          npm publish "tarballs/brewlint-${{ steps.version.outputs.version }}.tgz" \
+          npm publish "$GITHUB_WORKSPACE/tarballs/brewlint-${{ steps.version.outputs.version }}.tgz" \
             --provenance --access public
 
       - name: Verify the published install
