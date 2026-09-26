@@ -17,9 +17,9 @@ never had a JDK installed.
 
 | Platform | Binary |
 |---|---|
-| macOS on Apple Silicon | `@brewlint/macos-arm64` |
-| Linux on x86-64 | `@brewlint/linux-x64` |
-| Windows on x86-64 | `@brewlint/win-x64` |
+| macOS on Apple Silicon | `brewlint-macos-arm64` |
+| Linux on x86-64 | `brewlint-linux-x64` |
+| Windows on x86-64 | `brewlint-win-x64` |
 
 Those are optional dependencies: npm installs the one that matches your platform and skips the rest.
 You never install them by hand.

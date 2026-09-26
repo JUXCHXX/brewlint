@@ -330,7 +330,7 @@ and every consumer misreads. `JsonReportRendererTest` asserts the nested types a
 arrays, and CI re-parses the real output with `json.load` for the same reason.
 
 Node's platform names and npm's are not the same. Node says `darwin-arm64`; the package that holds
-the binary is called `@brewlint/macos-arm64`. Deriving one from the other gives a shim that looks for
+the binary is called `brewlint-macos-arm64`. Deriving one from the other gives a shim that looks for
 a package the install never put there, which fails confusingly because the install genuinely
 succeeded. `lib/platforms.js` is a data file rather than branching logic so the mapping is stated
 once, and `npm/brewlint/test/platforms.test.js` pins it.
@@ -342,9 +342,9 @@ Three npm packages, one per platform, plus a thin main package:
 ```
 npm install -g brewlint
 └── optionalDependencies
-    ├── @brewlint/macos-arm64   48 MB   (skipped on other platforms)
-    ├── @brewlint/linux-x64     ~45 MB  (skipped)
-    └── @brewlint/win-x64       ~45 MB  (skipped)
+    ├── brewlint-macos-arm64   48 MB   (skipped on other platforms)
+    ├── brewlint-linux-x64     ~45 MB  (skipped)
+    └── brewlint-win-x64       ~45 MB  (skipped)
 ```
 
 Each platform package declares `os` and `cpu`, which is the entire mechanism: npm reads them and

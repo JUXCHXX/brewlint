@@ -10,7 +10,7 @@
 
 const path = require('node:path');
 
-const { binaryFor, platformKey, supportedSummary } = require('./platforms.js');
+const { binaryFor, binaryPackageName, platformKey, supportedSummary } = require('./platforms.js');
 
 /** Absolute path to the Brewlint binary for this machine. Throws if it is not installed. */
 function binaryPath() {
@@ -20,7 +20,12 @@ function binaryPath() {
       `Brewlint has no binary for ${platformKey()}.\nSupported:\n${supportedSummary()}`,
     );
   }
-  const packageRoot = path.dirname(require.resolve(`@brewlint/${entry.packageName}/package.json`));
+  // binaryPackageName, never the name rebuilt here. It used to be a template literal of its own,
+  // which meant the naming scheme existed in two files and changing one of them broke the other in
+  // a way that only showed up on a machine where the other one had already been installed.
+  const packageRoot = path.dirname(
+    require.resolve(`${binaryPackageName()}/package.json`),
+  );
   return path.join(packageRoot, entry.executable);
 }
 

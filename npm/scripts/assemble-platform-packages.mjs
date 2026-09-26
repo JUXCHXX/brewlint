@@ -72,7 +72,11 @@ async function assemble(target, launcherPath) {
   }
 
   const packageJson = {
-    name: `@brewlint/${target.npmName}`,
+    // Unscoped. A prefix, not a scope: an npm user account owns its own @username scope and
+    // nothing else, so a scope like @brewlint had to be created as an organisation, which needs a
+    // verified email on the account. The shim derives this name from the same rule, and
+    // npm/brewlint/test/platforms.test.js asserts the two agree.
+    name: `brewlint-${target.npmName}`,
     version,
     description:
       `The Brewlint binary for ${target.os[0]} ${target.cpu[0]}. ` +

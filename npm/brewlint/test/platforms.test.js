@@ -16,6 +16,7 @@ const { test } = require('node:test');
 
 const {
   BINARIES,
+  PREFIX,
   binaryFor,
   binaryPackageName,
   platformKey,
@@ -30,11 +31,48 @@ test('the platform key is node platform-arch', () => {
 
 test('npm package names are ours, not node platform names', () => {
   // The bug this guards against: deriving the package name from the node platform gives
-  // @brewlint/darwin-arm64, which is not a package that exists. The install succeeds and the
+  // brewlint-darwin-arm64, which is not a package that exists. The install succeeds and the
   // shim then fails, which is a miserable thing to debug.
-  assert.strictEqual(binaryPackageName('darwin', 'arm64'), '@brewlint/macos-arm64');
-  assert.strictEqual(binaryPackageName('linux', 'x64'), '@brewlint/linux-x64');
-  assert.strictEqual(binaryPackageName('win32', 'x64'), '@brewlint/win-x64');
+  assert.strictEqual(binaryPackageName('darwin', 'arm64'), 'brewlint-macos-arm64');
+  assert.strictEqual(binaryPackageName('linux', 'x64'), 'brewlint-linux-x64');
+  assert.strictEqual(binaryPackageName('win32', 'x64'), 'brewlint-win-x64');
+});
+
+test('the package names are unscoped, because a user account cannot own one', () => {
+  // An npm user account owns its own @username scope and nothing else. A scope like @brewlint
+  // has to be created as an organisation, which requires a verified email address on the
+  // account. This is not a style preference: the first release attempt failed on exactly this.
+  for (const [key, entry] of Object.entries(BINARIES)) {
+    assert.ok(
+      !binaryPackageName(...key.split('-')).includes('@'),
+      `${key} resolves to a scoped name, which cannot be published from a user account`,
+    );
+  }
+  assert.ok(!PREFIX.startsWith('@'), 'the prefix must not be a scope');
+});
+
+test('the main package depends on exactly the packages the shim looks for', () => {
+  // This is the drift that actually bites. The shim resolves one name, npm installs the names in
+  // optionalDependencies, and if the two disagree the install succeeds, nothing is missing by
+  // npm's reckoning, and the first command a user runs fails. It cannot be caught by testing the
+  // shim or the manifest separately, only by putting them next to each other.
+  const manifest = require(resolve(__dirname, '..', 'package.json'));
+  const declared = Object.keys(manifest.optionalDependencies ?? {}).sort();
+  const lookedFor = Object.keys(BINARIES)
+    .map((key) => binaryPackageName(...key.split('-')))
+    .sort();
+
+  assert.deepStrictEqual(
+    declared,
+    lookedFor,
+    'optionalDependencies and the shim platform table have drifted apart',
+  );
+  // The exact versions are load-bearing for the other half of this: the platform packages must
+  // exist on the registry before the main one is published, and the release workflow relies on
+  // every version agreeing.
+  for (const [name, range] of Object.entries(manifest.optionalDependencies ?? {})) {
+    assert.match(range, /^\d+\.\d+\.\d+$/, `${name} must be pinned to an exact version`);
+  }
 });
 
 test('an unsupported platform resolves to null rather than throwing', () => {
@@ -69,7 +107,7 @@ test('the supported summary lists every platform', () => {
 });
 
 test('the package name matches what the assembler writes', () => {
-  // The assembler names packages @brewlint/<npmName>; this table must agree or npm installs a
+  // The assembler names packages brewlint-<npmName>; this table must agree or npm installs a
   // package the shim never looks for.
   const expected = { 'darwin-arm64': 'macos-arm64', 'linux-x64': 'linux-x64', 'win32-x64': 'win-x64' };
   for (const [key, packageName] of Object.entries(expected)) {

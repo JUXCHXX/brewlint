@@ -36,8 +36,8 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@brewlint/macos-arm64": "0.1.0",
-    "@brewlint/linux-x64": "0.1.0",
-    "@brewlint/win-x64": "0.1.0"
+    "brewlint-macos-arm64": "0.1.0",
+    "brewlint-linux-x64": "0.1.0",
+    "brewlint-win-x64": "0.1.0"
   }
 }
