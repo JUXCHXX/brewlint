@@ -1,10 +1,11 @@
 {
-  "name": "brewlint",
-  "displayName": "Brewlint",
+  "name": "brewlint-extension",
+  "displayName": "Brewlint-vscode",
   "description": "Spring Boot anti-patterns as you type: private @Transactional methods, unclosed resources, field injection, and more, as Diagnostics.",
-  "version": "0.1.0",
-  "publisher": "JUXCHXX",
+  "version": "0.1.1",
+  "publisher": "JXCHXX",
   "license": "MIT",
+  "icon": "isotipo.png",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JUXCHXX/brewlint.git"
@@ -74,6 +75,6 @@
     "test": "node --test test/"
   },
   "dependencies": {
-    "brewlint": "0.1.0"
+    "brewlint": "0.1.1"
   }
 }

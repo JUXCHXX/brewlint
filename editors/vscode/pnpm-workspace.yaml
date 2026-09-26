@@ -1,0 +1,5 @@
+minimumReleaseAgeExclude:
+  - brewlint-linux-x64@0.1.1
+  - brewlint-macos-arm64@0.1.1
+  - brewlint-win-x64@0.1.1
+  - brewlint@0.1.1

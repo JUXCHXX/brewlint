@@ -1,0 +1,52 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      brewlint:
+        specifier: 0.1.1
+        version: 0.1.1
+
+packages:
+
+  brewlint-linux-x64@0.1.1:
+    resolution: {integrity: sha512-SlF+8VE9iCLav0H5R0mabA4L4nxptSD31R9VGK/CZfD2FdaOWLk6CECWaMQLZTwzmosuRyhOP76g9x2XHWqPmg==}
+    cpu: [x64]
+    os: [linux]
+
+  brewlint-macos-arm64@0.1.1:
+    resolution: {integrity: sha512-vLxtNtzVjmXLo5r6FZfWYyxSbqxiLBYsc2zpltgg6WwMM5MiRbMCR5hltKbiZpd9l+rdAqJ9SeZfHZ9l9P367A==}
+    cpu: [arm64]
+    os: [darwin]
+
+  brewlint-win-x64@0.1.1:
+    resolution: {integrity: sha512-OWmZj5KLPdjN5vQl63WGYcoMRFz1jWFP31GJ9U5h64jQCfg9wmm8aspX/k7a98O9vSB1WCbtyvdHcWzRYUS6VA==}
+    cpu: [x64]
+    os: [win32]
+
+  brewlint@0.1.1:
+    resolution: {integrity: sha512-JZ3qwlPlgZ8Cf9qEUrsUi/gFVv3G5RZMqUQKlCi6ocDUclZ63wA92hiBHUXXnmpzC1onw2oOoJTLRXmLabmY8Q==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+snapshots:
+
+  brewlint-linux-x64@0.1.1:
+    optional: true
+
+  brewlint-macos-arm64@0.1.1:
+    optional: true
+
+  brewlint-win-x64@0.1.1:
+    optional: true
+
+  brewlint@0.1.1:
+    optionalDependencies:
+      brewlint-linux-x64: 0.1.1
+      brewlint-macos-arm64: 0.1.1
+      brewlint-win-x64: 0.1.1
