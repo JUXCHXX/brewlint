@@ -25,7 +25,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -66,27 +66,28 @@ function section(title) {
 }
 
 /**
- * Lists the entries in a tarball. Takes the full path, not a name.
+ * Packs a package and returns the file list npm computed for it.
  *
- * <p>Not spawnSync('tar', ...) directly, and the reason is a path, not a program. On Windows this
- * ran as `tar -tzf C:\...` and GNU tar read the C: as a remote host specification, so it tried to
- * connect to a machine called "C" and failed with "Cannot connect to C: resolve failed". A ./ prefix
- * stops tar treating the drive letter as a host.
+ * <p>Not `tar -tzf` on the result. The three `tar` implementations in play are three different
+ * programs: GNU tar on the Linux runner, BSD tar on macOS, and a Windows bsdtar behind a Git Bash
+ * path-translation layer that rewrote `C:\Users\...` into `C\:/Users/...` and produced
+ * "Cannot open: No such file or directory" for a file that demonstrably existed. Prefixing `./` and
+ * normalising the slashes both failed, because the mangling happens in the shell, after Node hands
+ * the argument over.
  *
- * <p>Absolute path on the way in, so there is one unambiguous contract: some callers hold a bare
- * file name from `npm pack` and some already hold a joined path, and a helper that quietly
- * prefixes a directory turns the second kind into a doubled path that tar cannot open.
+ * <p>`npm pack --json` asks npm itself which files the `files` allowlist selected, which is the
+ * actual question being asked here, and it is the same answer on every platform because it is
+ * computed by the same program that will build the tarball. One subprocess, no external tool, and
+ * the check can no longer disagree with what gets published.
  */
-function listTarball(tarball) {
-  const absolute = isAbsolute(tarball) ? tarball : join(tarballDir, tarball);
-  const specifier = process.platform === 'win32' ? `./${absolute.replace(/\\/g, '/')}` : absolute;
-  return execFileSync('tar', ['-tzf', specifier], {
-    encoding: 'utf8',
-    // A platform tarball is 87 MB of already-compressed runtime, and the listing is every path in
-    // it. Node's default 1 MB buffer is not enough and truncates into a silently wrong answer.
-    maxBuffer: 64 * 1024 * 1024,
-    windowsHide: true,
-  });
+function pack(cwd) {
+  const report = JSON.parse(npm(['pack', '--json', '--pack-destination', tarballDir], { cwd }));
+  const entry = Array.isArray(report) ? report[0] : report;
+  return {
+    filename: entry.filename,
+    // The real path in the tarball is "package/<path>"; npm reports it without that prefix.
+    files: entry.files.map((file) => `package/${file.path}`),
+  };
 }
 
 // Which platform package did we assemble? On a single machine there is exactly one.
@@ -116,31 +117,32 @@ try {
   // Step 1: pack. Packing rather than copying is the point: it applies the `files` allowlist, which
   // is the thing that silently omits a file in every Node project ever published.
   section('1. npm pack');
-  const mainTarball = npm(['pack', '--pack-destination', tarballDir], { cwd: mainPackageDir })
-    .trim()
-    .split('\n')
-    .pop();
+  const main = pack(mainPackageDir);
+  const mainTarball = main.filename;
 
   const platformTarballs = [];
+  const platformPack = [];
   for (const name of assembled) {
-    const packed = npm(['pack', '--pack-destination', tarballDir], {
-      cwd: join(platformDir, name),
-    }).trim().split('\n').pop();
-    platformTarballs.push(join(tarballDir, packed));
+    const packed = pack(join(platformDir, name));
+    platformPack.push(packed);
+    platformTarballs.push(join(tarballDir, packed.filename));
   }
   check(`main package packs (${mainTarball})`, mainTarball.endsWith('.tgz'));
-  check(`platform package packs`, platformTarballs.length === assembled.length);
+  check('platform package packs', platformTarballs.length === assembled.length);
 
-  // The tarball must actually contain the binary, not just the manifest.
+  // The tarball must actually contain the binary, not just the manifest. These are the paths npm
+  // put in the tarball, not a guess about what it should have put in it.
   section('2. tarball contents');
-  const listing = listTarball(mainTarball);
-  check('the launcher is in the main tarball', listing.includes('package/bin/brewlint.js'));
-  check('the platform table is in the main tarball', listing.includes('package/lib/platforms.js'));
+  check('the launcher is in the main tarball', main.files.includes('package/bin/brewlint.js'));
+  check('the platform table is in the main tarball', main.files.includes('package/lib/platforms.js'));
 
-  // maxBuffer is generous because a platform tarball is 87 MB of mostly already-compressed
-  // runtime, and the listing is every path in it.
-  const platformListing = listTarball(platformTarballs[0]);
-  check('the binary is in the platform tarball', platformListing.includes('/bin/'), 'a manifest-only tarball would pass npm publish and fail at run time');
+  const platformFiles = platformPack[0].files;
+  check(
+    'the binary is in the platform tarball',
+    platformFiles.some((file) => file.includes('/bin/')),
+    'a manifest-only tarball would pass npm publish and fail at run time; found: ' +
+      (platformFiles.slice(0, 5).join(', ') || 'nothing'),
+  );
 
   // Step 3: install into a clean prefix, exactly as a global install would.
   section('3. install into a clean prefix');
