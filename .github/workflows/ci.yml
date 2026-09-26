@@ -71,14 +71,43 @@ jobs:
           # activates and then does nothing, which looks identical to "no findings".
           node -e "console.log('  binary: ' + require('brewlint').binaryPath())"
 
+      - name: Package the CLI
+        run: ./mvnw --batch-mode -DskipTests package
+
+      - name: The GitHub Action renders a real report
+        run: |
+          set -euo pipefail
+          source scripts/ci-guard.sh
+          # The two rendering scripts, tested. The steps around them need the GitHub API and cannot
+          # run here, which is exactly why the logic that can be tested is not inlined in the YAML
+          # where nobody would run it.
+          node --test .github/actions/brewlint/test/ 2>&1 | tee action.log
+          require_success_marker "fail 0" "a GitHub Action test failed" action.log
+
+          # And then end to end against the real report from the broken fixtures, which is the only
+          # way to see the annotation syntax and the comment markdown as GitHub will read them.
+          # Needs the packaged jar, so this step runs after "Package the CLI". A local run of this
+          # script passed while a jar was already lying around, which is how the ordering bug got
+          # in: locally there is no such thing as too late.
+          JAR=$(ls brewlint-cli/target/brewlint-cli-*.jar | head -1)
+          java -jar "$JAR" scan --path fixtures --format json --output /tmp/report.json --fail-on none
+          BREWLINT_EXIT=1 node .github/actions/brewlint/render-annotations.js /tmp/report.json \
+            | tee /tmp/annotations.txt
+          require_success_marker "::error file=src/main/java" \
+            "the annotations do not point at a real file in the broken fixtures" /tmp/annotations.txt
+          require_success_marker "29 finding(s)" \
+            "the annotation summary does not match the fixtures" /tmp/annotations.txt
+
+          node .github/actions/brewlint/render-comment.js /tmp/report.json 2 > /tmp/comment.md
+          require_success_marker "<!-- brewlint-report -->" \
+            "the comment has no marker, so the next run would stack a new one" /tmp/comment.md
+          require_success_marker "RES001" "the comment lists no findings" /tmp/comment.md
+
       # The same promise as above, exercised end to end: the fat jar has to run on a machine that
       # only has a JDK, and it has to find the problems the README claims. This step is also the
       # guard against the quiet ServiceLoader failure: if the shade plugin stops merging
       # META-INF/services, the jar discovers zero rules, reports "No findings" and exits 0, and
       # this assertion is what catches it.
-      - name: Package the CLI
-        run: ./mvnw --batch-mode -DskipTests package
-
       - name: Run the CLI against the broken fixtures
         run: |
           set -euo pipefail
@@ -92,7 +121,7 @@ jobs:
           fi
           # Every rule has to fire on something. A rule that never fires is either broken or
           # pointless, and no unit test can tell the difference on its own.
-          for RULE in AOP001 BEAN001 BEAN002 BEAN003 RES001 RES002 TX002 TX003; do
+          for RULE in AOP001 BEAN001 BEAN002 BEAN003 PERF001 RES001 RES002 TX002 TX003; do
             grep -q "$RULE" report.txt || {
               echo "::error::$RULE was not reported; the shaded jar likely lost its rule discovery"
               exit 1

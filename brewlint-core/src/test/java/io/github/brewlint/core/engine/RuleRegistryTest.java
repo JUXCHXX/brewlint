@@ -23,17 +23,23 @@ class RuleRegistryTest {
 
         assertThat(rules).extracting(Rule::id).containsExactly(
                 "AOP001", "BEAN001", "BEAN002", "BEAN003",
-                "RES001", "RES002", "TX002", "TX003");
+                "PERF001", "RES001", "RES002", "TX002", "TX003");
     }
 
     @Test
-    @DisplayName("only the cross-file rule asks for the project index")
+    @DisplayName("only the rules that cannot work without one ask for the project index")
     void projectIndexIsOptIn() {
-        // Building the index means parsing every file twice, so a rule must justify the cost.
+        // Building the index means parsing every file twice, so each rule on this list has to
+        // justify the cost rather than merely benefit from it.
+        //
+        // BEAN002 cannot tell whether an injected bean is prototype scoped without seeing the other
+        // file that declares it. PERF001 cannot tell whether a field is a Spring Data repository
+        // without the same, and a rule that guessed "it ends in Repository" would be reporting on
+        // a guess. Both are the same justification, which is the point of asking.
         assertThat(RuleRegistry.discover())
                 .filteredOn(Rule::requiresProjectIndex)
                 .extracting(Rule::id)
-                .containsExactly("BEAN002");
+                .containsExactly("BEAN002", "PERF001");
     }
 
     @Test

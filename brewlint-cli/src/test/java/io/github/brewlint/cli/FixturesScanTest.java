@@ -76,7 +76,22 @@ class FixturesScanTest {
         // would say so without this.
         assertThat(ruleIds())
                 .containsExactlyInAnyOrder("AOP001", "BEAN001", "BEAN002", "BEAN003",
-                        "RES001", "RES002", "TX002", "TX003");
+                        "PERF001", "RES001", "RES002", "TX002", "TX003");
+    }
+
+    @Test
+    @DisplayName("PERF001 finds the query in the loop, in each of the three loop forms")
+    void findsPerf001() {
+        List<Finding> findings = rule("PERF001");
+
+        // CustomerReportService: a for loop, a stream forEach, and a while loop. Three forms,
+        // because a rule that only understands statement-position loops misses every codebase that
+        // has read about streams, and nothing else in the build would notice.
+        assertThat(findings).hasSize(3);
+        assertThat(findings).allSatisfy(finding ->
+                assertThat(finding.filePath()).endsWith("CustomerReportService.java"));
+        assertThat(findings).anySatisfy(finding ->
+                assertThat(finding.message()).contains("findById()"));
     }
 
     @Test

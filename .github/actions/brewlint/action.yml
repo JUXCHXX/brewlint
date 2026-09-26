@@ -1,0 +1,134 @@
+name: Brewlint
+description: >-
+  Report Spring Boot anti-patterns on a pull request: inline annotations on the diff, and a
+  comment that updates in place instead of stacking up on every push.
+author: JUXCHXX
+
+branding:
+  icon: alert-circle
+  color: purple
+
+inputs:
+  path:
+    description: Project directory to analyse.
+    required: false
+    default: '.'
+  version:
+    description: >-
+      Version of the brewlint package to run. Pinned by default, because an action whose analysis
+      changes because someone published a release is an action whose checks change with no commit.
+    required: false
+    default: '0.1.0'
+  fail-on:
+    description: >-
+      Lowest severity that fails the check: ERROR, WARNING, INFO or NONE. Findings below the
+      threshold are still reported, just not as a failure.
+    required: false
+    default: 'ERROR'
+  comment:
+    description: Post or update a summary comment on the pull request.
+    required: false
+    default: 'true'
+  max-findings:
+    description: >-
+      Most findings to list per file in the comment. The comment says how many were left out
+      rather than truncating silently, because a summary that quietly stops at five reads as
+      "that is all of them".
+    required: false
+    default: '5'
+
+outputs:
+  findings:
+    description: Total number of findings.
+    value: ${{ steps.scan.outputs.findings }}
+  errors:
+    description: Number of findings at ERROR.
+    value: ${{ steps.scan.outputs.errors }}
+  warnings:
+    description: Number of findings at WARNING.
+    value: ${{ steps.scan.outputs.warnings }}
+  exit-code:
+    description: >-
+      Brewlint's own exit code: 0 clean, 1 findings over the threshold, 2 could not run.
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Brewlint
+      # A pinned version, not @latest. A linter that silently changes what it reports turns every
+      # green build into an unverified claim.
+      shell: bash
+      run: npm install --no-save --no-audit --no-fund --loglevel error "brewlint@${{ inputs.version }}"
+
+    - name: Scan
+      id: scan
+      shell: bash
+      env:
+        # The runner's temp directory, not the project. A report written into the checked-out
+        # repository shows up in git status on the next run, and in the diff of the very pull
+        # request this action is commenting on.
+        RESULT: ${{ runner.temp }}/brewlint-report.json
+      run: |
+        set -uo pipefail
+        set +e
+        npx --no-install brewlint scan \
+          --path "${{ inputs.path }}" \
+          --format json \
+          --fail-on "${{ inputs.fail-on }}" \
+          --output "$RESULT"
+        BREWLINT_EXIT=$?
+        set -e
+        export BREWLINT_EXIT
+
+        # 0 clean, 1 findings over the threshold, 2 could not run. Only the third is a failure of
+        # the action itself, and it is reported as one so a broken setup is never mistaken for a
+        # clean project.
+        if [ "$BREWLINT_EXIT" -ge 2 ]; then
+          echo "::error::Brewlint could not analyse this project (exit $BREWLINT_EXIT)"
+          exit "$BREWLINT_EXIT"
+        fi
+
+        # Annotations and outputs, from the tested script next to this one rather than from inline
+        # JavaScript. The only way to run this for real is to open a pull request, and the first
+        # person to do that should not be the one debugging a template literal.
+        node "${{ github.action_path }}/render-annotations.js" "$RESULT"
+
+        if [ "$BREWLINT_EXIT" -eq 1 ]; then
+          echo "::error::Brewlint found problems at or above the ${{ inputs.fail-on }} threshold"
+          exit 1
+        fi
+
+    - name: Comment on the pull request
+      if: github.event_name == 'pull_request' && inputs.comment == 'true'
+      shell: bash
+      env:
+        RESULT: ${{ runner.temp }}/brewlint-report.json
+      run: |
+        set -euo pipefail
+        # The markdown, from the tested script. Only the finding and updating of the comment is
+        # here, because that part genuinely needs the GitHub API and cannot be tested offline.
+        BODY="${{ runner.temp }}/brewlint-comment.md"
+        node "${{ github.action_path }}/render-comment.js" "$RESULT" "${{ inputs.max-findings }}" > "$BODY"
+
+        # One comment, updated in place. A new comment on every push buries the review and trains
+        # people to ignore the bot, which is worse than not commenting at all. The marker in the
+        # body is how the next run finds this one.
+        MARKER='<!-- brewlint-report -->'
+        COMMENT_ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+          --paginate --jq "[.[] | select(.body | contains(\"$MARKER\"))] | .[0].id // empty")
+
+        if [ -n "$COMMENT_ID" ]; then
+          gh api "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID" \
+            --method PATCH --field body="@$BODY" >/dev/null
+          echo "    updated comment $COMMENT_ID"
+        else
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --method POST --field body="@$BODY" >/dev/null
+          echo "    posted a new comment"
+        fi

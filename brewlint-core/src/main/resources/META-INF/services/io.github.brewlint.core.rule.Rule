@@ -4,6 +4,7 @@ io.github.brewlint.core.rules.aop.AopAnnotationOnNonProxyableMethodRule
 io.github.brewlint.core.rules.bean.EntityAnnotatedAsBeanRule
 io.github.brewlint.core.rules.bean.FieldInjectionRule
 io.github.brewlint.core.rules.bean.PrototypeIntoSingletonRule
+io.github.brewlint.core.rules.performance.QueryInsideLoopRule
 io.github.brewlint.core.rules.resource.UnclosedFileStreamRule
 io.github.brewlint.core.rules.resource.UnclosedResourceRule
 io.github.brewlint.core.rules.transactional.MissingRollbackForRule

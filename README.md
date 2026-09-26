@@ -12,9 +12,9 @@ runs out of file descriptors under load, in a completely different part of the s
 throws, neither logs, and neither is caught by a code review that reads for intent rather than
 mechanics.
 
-> **Status: Hitos 1 to 6 complete.** Eight rules, a self-contained binary, an optional AI pass with
-> two providers, terminal, JSON and PDF reports, a VS Code extension, 387 Java tests, 41 extension
-> tests and 26 packaging checks. See [Roadmap](#roadmap) for what is next.
+> **Status: Hitos 1 to 8 complete.** Nine rules, a self-contained binary, an optional AI pass
+> with two providers, terminal, JSON and PDF reports, a VS Code extension, a GitHub Action, 408 Java
+> tests, 63 client-side tests and 26 packaging checks. See [Roadmap](#roadmap).
 
 ---
 
@@ -63,7 +63,7 @@ brewlint 0.1.0-SNAPSHOT
       -> Use try-with-resources: try (InputStream template = ...) { ... }.
 
   ------------------------------------------------------------------------------
-  26 findings in 6 files  ·  9 files scanned  ·  17 errors, 7 warnings, 2 info  ·  131ms
+  29 findings in 7 files  ·  14 files scanned  ·  17 errors, 10 warnings, 2 info  ·  197ms
 ```
 
 ### Rules
@@ -78,6 +78,7 @@ brewlint 0.1.0-SNAPSHOT
 | `BEAN001` | `bean` | error | A JPA `@Entity` or Mongo `@Document` also annotated `@Component`/`@Service`/`@Repository` |
 | `BEAN002` | `bean` | warning | A prototype-scoped bean injected into a singleton, so every caller shares one instance |
 | `BEAN003` | `bean` | info | Field injection with `@Autowired`/`@Inject`/`@Resource`, which leaves a half-constructed bean |
+| `PERF001` | `performance` | warning | A repository or `EntityManager` query inside a loop: the N+1, one query per iteration |
 
 `./mvnw package && java -jar brewlint-cli/target/*.jar scan --list-rules` prints the live list.
 
@@ -327,7 +328,7 @@ file is useless.
 injected into a singleton" is a statement about two different files, and a rule that only sees one
 `CompilationUnit` cannot make it. A rule declares `requiresProjectIndex()` and the engine builds a
 small index of every declared type if, and only if, an enabled rule asks. A run of single-file rules
-pays nothing. `RuleRegistryTest` asserts that exactly one of the eight rules currently opts in, so
+pays nothing. `RuleRegistryTest` asserts that exactly two of the nine rules opt in, so
 the cost cannot quietly spread.
 
 **Names are not proof of identity.** The index is keyed by simple name, and two packages can both
@@ -353,7 +354,7 @@ the GitHub Action are all built on that one object.
 
 `maven-shade-plugin` silently loses `META-INF/services` unless `ServicesResourceTransformer` is
 configured. Miss it and the fat jar discovers **zero** rules, reports "No findings" and exits `0`.
-CI runs the shaded jar against `fixtures/`, asserts all eight rule ids appear, and separately
+CI runs the shaded jar against `fixtures/`, asserts all nine rule ids appear, and separately
 asserts the correct fixtures stay clean.
 
 `brewlint.yml` cannot carry a `distributionSha256Sum` for the Maven distribution. The wrapper
@@ -424,6 +425,59 @@ are present and runs the launcher with an empty environment before declaring suc
 is in that list for Hito 4: without it the packaged binary would work perfectly until the Anthropic
 provider shipped, and then fail only for npm users, which is the worst possible way to find out.
 
+## The GitHub Action
+
+Findings on a pull request: inline annotations on the diff, and one comment that updates in place.
+
+```yaml
+- uses: JUXCHXX/brewlint@v0.1.0
+  with:
+    path: .
+    fail-on: ERROR
+```
+
+Two things about it are decisions rather than defaults.
+
+**One comment, updated in place.** A new comment on every push buries the review and trains people
+to ignore the bot, which is worse than not commenting at all. The comment carries a marker, and the
+next run finds it and updates it.
+
+**Findings grouped by file, and truncation announced.** Forty findings sorted by severity is not
+something anybody can review; the same forty sorted by file is a checklist. And when a file has more
+findings than fit, the comment says how many were left out — a summary that quietly stops at five
+reads as "that is all of them", and the reader concludes the file is nearly clean.
+
+The rendering is two ordinary files with 20 tests, not JavaScript inlined in the YAML. The only way
+to run a composite action for real is to open a pull request, and the first person to do that should
+not be the person debugging a template literal. `CI` runs both against a real report from the broken
+fixtures and asserts the annotation syntax points at a file that exists.
+
+## The N+1 rule
+
+`PERF001`: a query inside a loop. One query for the list, then one more per element, so a page of
+twenty rows costs twenty-one round trips.
+
+It is the most common performance bug in a Spring application and the one that survives review most
+often, because the code that causes it looks entirely reasonable: a loop, and a call on the thing
+the loop is over.
+
+Three limits are stated in the rule itself rather than in a disclaimer appended to it, because they
+change what the finding means:
+
+- **It is a false positive** when Hibernate batches fetches, with `@BatchSize` or
+  `hibernate.default_batch_fetch_size`. That is in a properties file the scan cannot see. The finding
+  is a `WARNING`, not an `ERROR`, and the suggestion says to check the batching before refactoring.
+- **It is a false negative** when the loop lives in a method called once per element, which is the
+  same N+1 written somewhere else.
+- It understands `for`, enhanced `for`, `while`, `do`, and `forEach` with a lambda. A rule that only
+  understands statement-position loops misses every codebase that has read about streams.
+
+And the one worth reading twice, because it was a bug: **"this field is a repository" is resolved
+through the file's own imports.** The first version asked whether *every* type with that simple name
+in the project was a repository, which is what `BEAN002` does. It is wrong here, and a fixture is
+what showed it — a plain `class OrderRepository` somewhere unrelated in the project silently switched
+N+1 detection off for every file. A finding had come to depend on a class it had nothing to do with.
+
 ## Architecture
 
 ```
@@ -457,8 +511,8 @@ accidentally depend on it building.
 | 4 | `AiProvider` contract, Anthropic, local Ollama, secret redaction | **done** |
 | 5 | PDF report via OpenHTMLtoPDF | **done** |
 | 6 | VS Code extension rendering findings as Diagnostics | **done** |
-| 7 | GitHub Action commenting on pull requests | planned |
-| 8 | N+1 detection, scoped to the unambiguous pattern | planned |
+| 7 | GitHub Action commenting on pull requests | **done** |
+| 8 | N+1 detection, scoped to the unambiguous pattern | **done** |
 
 Hito 3 is complete but not published. The three platform binaries cannot be built on one machine, so
 the release workflow needs a run on the tag `v0.1.0`, and `npm publish --provenance` needs an
