@@ -25,7 +25,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -184,16 +184,31 @@ try {
   // not contain any java. Building the PATH by filtering out every directory that holds a `java`
   // executable is what makes the test mean something: an empty PATH would fail for the wrong reason
   // and prove nothing.
-  const pathWithoutJdk = process.env.PATH
-    .split(':')
-    .filter((entry) => entry && !existsSync(join(entry, 'java')) && !existsSync(join(entry, 'java.exe')))
-    .join(':');
+  //
+  // path.delimiter, not a hardcoded ':'. Windows separates PATH entries with ';' and ':' is a legal
+  // character inside a path like 'C:\Program Files\Git\usr\bin', so splitting on ':' there produced
+  // one enormous entry, filtered nothing, and the "no java on PATH" check failed while every check
+  // that actually depended on it still passed. A guard that fails for a reason unrelated to what it
+  // guards is a guard that trains people to ignore it.
+  const withoutJdk = (value) =>
+    value
+      .split(delimiter)
+      .filter((entry) => entry && !existsSync(join(entry, 'java')) && !existsSync(join(entry, 'java.exe')))
+      .join(delimiter);
+
+  const pathWithoutJdk = withoutJdk(process.env.PATH ?? '');
+  // The directory the shim itself lives in, which is under the install prefix and not on PATH.
   const nodeDirectory = dirname(process.execPath);
+
+  // Not `spawnSync('java')`, because on Windows the absence of a program and a failed run look the
+  // same through some paths. This asks the filesystem directly what the filtered PATH now resolves.
+  const javaStillReachable = withoutJdk(process.env.PATH ?? '')
+    .split(delimiter)
+    .some((entry) => entry && existsSync(join(entry, 'java')));
 
   check(
     'no java is reachable on the test PATH',
-    spawnSync('java', ['-version'], { env: { PATH: pathWithoutJdk }, encoding: 'utf8' }).error
-      ?.code === 'ENOENT',
+    !javaStillReachable,
     'a JDK on PATH would make every check below meaningless',
   );
 
