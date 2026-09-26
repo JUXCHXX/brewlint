@@ -74,15 +74,15 @@ jobs:
           # code path that needs it runs. Assert the log says so, rather than trusting that it did.
           require_success_marker "pdf report: ok" "the packaged binary could not render a PDF" dist-build.log
           require_success_marker "json report: ok" "the packaged binary could not render JSON" dist-build.log
-          require_output "the runtime image" "dist/{{ matrix.npm-name }}/**/*"
-          require_output "the recorded launcher path" "dist/launcher-{{ matrix.npm-name }}.txt"
+          require_output "the runtime image" "dist/${{ matrix.npm-name }}/**/*"
+          require_output "the recorded launcher path" "dist/launcher-${{ matrix.npm-name }}.txt"
 
       - name: Assemble and pack the npm packages
         run: |
           set -euo pipefail
           source scripts/ci-guard.sh
           node npm/scripts/assemble-platform-packages.mjs --pack | tee assemble.log
-          require_output "the platform package" "npm/platform/{{ matrix.npm-name }}/package.json"
+          require_output "the platform package" "npm/platform/${{ matrix.npm-name }}/package.json"
           require_success_marker "match the build" "the launcher path table is out of date" assemble.log
           require_output "the npm tarball" "build/*.tgz"
 
