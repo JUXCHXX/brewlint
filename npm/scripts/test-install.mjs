@@ -25,7 +25,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +63,30 @@ function npm(args, options = {}) {
 
 function section(title) {
   console.log(`\n${title}`);
+}
+
+/**
+ * Lists the entries in a tarball. Takes the full path, not a name.
+ *
+ * <p>Not spawnSync('tar', ...) directly, and the reason is a path, not a program. On Windows this
+ * ran as `tar -tzf C:\...` and GNU tar read the C: as a remote host specification, so it tried to
+ * connect to a machine called "C" and failed with "Cannot connect to C: resolve failed". A ./ prefix
+ * stops tar treating the drive letter as a host.
+ *
+ * <p>Absolute path on the way in, so there is one unambiguous contract: some callers hold a bare
+ * file name from `npm pack` and some already hold a joined path, and a helper that quietly
+ * prefixes a directory turns the second kind into a doubled path that tar cannot open.
+ */
+function listTarball(tarball) {
+  const absolute = isAbsolute(tarball) ? tarball : join(tarballDir, tarball);
+  const specifier = process.platform === 'win32' ? `./${absolute.replace(/\\/g, '/')}` : absolute;
+  return execFileSync('tar', ['-tzf', specifier], {
+    encoding: 'utf8',
+    // A platform tarball is 87 MB of already-compressed runtime, and the listing is every path in
+    // it. Node's default 1 MB buffer is not enough and truncates into a silently wrong answer.
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
 }
 
 // Which platform package did we assemble? On a single machine there is exactly one.
@@ -109,14 +133,13 @@ try {
 
   // The tarball must actually contain the binary, not just the manifest.
   section('2. tarball contents');
-  const listing = execFileSync('tar', ['-tzf', join(tarballDir, mainTarball)], { encoding: 'utf8' });
+  const listing = listTarball(mainTarball);
   check('the launcher is in the main tarball', listing.includes('package/bin/brewlint.js'));
   check('the platform table is in the main tarball', listing.includes('package/lib/platforms.js'));
 
-  const platformListing = execFileSync('tar', ['-tzf', platformTarballs[0]], {
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 * 1024,
-  });
+  // maxBuffer is generous because a platform tarball is 87 MB of mostly already-compressed
+  // runtime, and the listing is every path in it.
+  const platformListing = listTarball(platformTarballs[0]);
   check('the binary is in the platform tarball', platformListing.includes('/bin/'), 'a manifest-only tarball would pass npm publish and fail at run time');
 
   // Step 3: install into a clean prefix, exactly as a global install would.
